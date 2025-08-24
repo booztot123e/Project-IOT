@@ -1,0 +1,30 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+db.sqlite3
+*.sqlite3
+/media/
+staticfiles/
+
+# Secrets
+.env
+keys/
+*.pem
+*.key
+*.json
+
+# Node/Expo (ถ้ามี temp-monitor/)
+node_modules/
+npm-debug.log*
+yarn.lock
+.pnpm-debug.log*
+.expo/
+.expo-shared/
+dist/
+build/
+# IDE
+.vscode/
+.idea/
+.DS_Store

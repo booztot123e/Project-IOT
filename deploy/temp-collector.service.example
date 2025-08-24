@@ -1,0 +1,13 @@
+[Unit]
+Description=Temp Collector -> Firestore
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=pi
+WorkingDirectory=/home/pi/projects/max6675
+EnvironmentFile=/home/pi/projects/max6675/.env
+ExecStart=/home/pi/projects/max6675/.venv/bin/python -m sensor.collector
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

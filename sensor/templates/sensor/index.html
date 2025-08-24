@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Temperature Dashboard (Firestore)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .value { font-size: 42px; font-weight: 700; }
+    canvas { max-height: 360px; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <h1>Temperature Dashboard <span class="muted">(Device: {{ device_id }})</span></h1>
+
+  <div class="grid">
+    <div class="card">
+      <div class="muted">Current °C</div>
+      <div id="tempC" class="value">–</div>
+      <div class="muted">Updated: <span id="updated">–</span></div>
+    </div>
+    <div class="card">
+      <div class="muted">Current °F</div>
+      <div id="tempF" class="value">–</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    const el = id => document.getElementById(id);
+    let chart, lastTs = '';
+
+    async function fetchJSON(url){
+      const res = await fetch(url + (url.includes('?')?'&':'?') + '_=' + Date.now(), {
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res.json();
+    }
+
+    function fmtTime(iso){
+      const d = new Date(iso);
+      return d.toLocaleTimeString('th-TH', { hour12: false }); // HH:mm:ss
+    }
+
+    async function loadTemp(){
+      try{
+        const j = await fetchJSON('/api/temp/');
+        el('tempC').textContent = (j.temp_c?.toFixed ? j.temp_c.toFixed(2) : j.temp_c);
+        el('tempF').textContent = (j.temp_f?.toFixed ? j.temp_f.toFixed(2) : j.temp_f);
+        el('updated').textContent = j.timestamp || '–';
+        if (j.timestamp && j.timestamp !== lastTs) { lastTs = j.timestamp; el('tempC').style.opacity = 0.5; setTimeout(()=> el('tempC').style.opacity = 1, 200); }
+      }catch(e){ console.error('temp error:', e); }
+    }
+
+    async function loadHistory(){
+      try{
+        const h = await fetchJSON('/api/history/?limit=240');
+        const labels = (h.items||[]).map(i => fmtTime(i.timestamp));
+        const data = (h.items||[]).map(i => i.temp_c);
+        const min = Math.min(...data), max = Math.max(...data);
+
+        if(!chart){
+          chart = new Chart(document.getElementById('chart'), {
+            type:'line',
+            data:{ labels, datasets:[{ label:'Temperature (°C)', data, borderWidth:2, tension:0.3, pointRadius:0 }] },
+            options:{
+              interaction:{ mode:'index', intersect:false },
+              scales:{
+                x:{ ticks:{ maxTicksLimit: 10 } },
+                y:{ beginAtZero:false, suggestedMin: min - 0.5, suggestedMax: max + 0.5 }
+              }
+            }
+          });
+        }else{
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = data;
+          chart.options.scales.y.suggestedMin = min - 0.5;
+          chart.options.scales.y.suggestedMax = max + 0.5;
+          chart.update();
+        }
+      }catch(e){ console.error('history error:', e); }
+    }
+
+    async function boot(){
+      await loadHistory();              // กราฟครั้งแรก
+      await loadTemp();                 // ค่า current ครั้งแรก
+      setInterval(loadTemp, 10000);     // ให้ตรงกับ collector (10 วิ)
+      setInterval(loadHistory, 60000);  // รีโหลดกราฟทุก 60 วิ
+    }
+    boot();
+  </script>
+</body>
+</html>
