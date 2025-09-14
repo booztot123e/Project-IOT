@@ -12,8 +12,12 @@ DEFAULT_SA_PATH = os.environ.get(
 def init_app():
     if not firebase_admin._apps:
         cred = credentials.Certificate(DEFAULT_SA_PATH)
+        print("[fb-init] SA_PATH =", DEFAULT_SA_PATH)
+        print("[fb-init] PROJECT_ID =", os.environ.get("PROJECT_ID"))
         firebase_admin.initialize_app(cred)
+        
     return True
+
 
 @lru_cache(maxsize=1)
 def get_fs():

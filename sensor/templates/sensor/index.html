@@ -1,101 +1,301 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Temperature Dashboard (Firestore)</title>
-  <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 24px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
-    .muted { color: #6b7280; font-size: 12px; }
-    .value { font-size: 42px; font-weight: 700; }
-    canvas { max-height: 360px; }
-  </style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Temperature Dashboard (device: {{ device_id }})</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --card-bg:#fff; --muted:#6b7280; --line:#e5e7eb; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f7f7f8; }
+    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+    h1 { margin: 0 0 16px; }
+    .grid { display: grid; gap: 16px; }
+    .cards { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .card { background: var(--card-bg); border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .kpi-label { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+    .kpi-value { font-size: 44px; font-weight: 800; line-height: 1.1; }
+    .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .panel { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .btn { border: 1px solid var(--line); background: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer }
+    .btn.active { background: #111; color: #fff; border-color: #111; }
+    .btn-sm { padding: 4px 8px; font-size: 12px; }
+    .muted { color: var(--muted) }
+    canvas { width: 100%; height: 320px; }
+    @media(max-width:1024px) { .cards { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width:640px) { .cards { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-  <h1>Temperature Dashboard <span class="muted">(Device: {{ device_id }})</span></h1>
+  <div class="wrap">
+    <h1>Temperature Dashboard <span class="muted">(Device: {{ device_id }})</span></h1>
 
-  <div class="grid">
-    <div class="card">
-      <div class="muted">Current °C</div>
-      <div id="tempC" class="value">–</div>
-      <div class="muted">Updated: <span id="updated">–</span></div>
+    <!-- KPI cards -->
+    <div class="grid cards">
+      <div class="card">
+        <div class="kpi-label">Temp (°C)</div>
+        <div id="kpi-tempc" class="kpi-value">—</div>
+        <div class="kpi-sub">Updated: <span id="kpi-tempc-ts">—</span></div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Temp (°F)</div>
+        <div id="kpi-tempf" class="kpi-value">—</div>
+        <div class="kpi-sub">&nbsp;</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Current (A)</div>
+        <div id="kpi-amps" class="kpi-value">—</div>
+        <div class="kpi-sub">Updated: <span id="kpi-amps-ts">—</span></div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">Level (cm / %)</div>
+        <div class="kpi-value"><span id="kpi-level">—</span> <span class="muted">/</span> <span id="kpi-level-pct">—</span>%</div>
+        <div class="kpi-sub">Updated: <span id="kpi-level-ts">—</span></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="muted">Current °F</div>
-      <div id="tempF" class="value">–</div>
-    </div>
-  </div>
 
-  <div class="card">
-    <canvas id="chart"></canvas>
+    <!-- Range -->
+    <div class="panel" style="margin-top:16px">
+      <div class="toolbar">
+        <div><strong>Range:</strong></div>
+        <button class="btn" data-range="1">1h</button>
+        <button class="btn active" data-range="4">4h</button>
+        <button class="btn" data-range="24">24h</button>
+        <label style="margin-left:auto" class="muted">
+          <input type="checkbox" id="smoothToggle"> Smooth (×3 MA)
+        </label>
+      </div>
+
+      <!-- Firebase Switcher -->
+      <div id="fb-switch" style="display:flex;gap:.5rem;align-items:center;margin:8px 0 12px;">
+        <span>Firebase:</span>
+        <span id="fb-active" style="font-weight:700;">—</span>
+        <button id="fb-to-primary" class="btn btn-sm">Primary</button>
+        <button id="fb-to-secondary" class="btn btn-sm">Secondary</button>
+      </div>
+
+      <!-- 4 charts -->
+      <div class="grid" style="grid-template-columns:1fr; gap:24px">
+        <div>
+          <div class="muted" style="margin-bottom:6px">Temperature (°C)</div>
+          <canvas id="chart-temp"></canvas>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px">Current (A)</div>
+          <canvas id="chart-current"></canvas>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px">Level (cm)</div>
+          <canvas id="chart-level"></canvas>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px">Cycles (cpm)</div>
+          <canvas id="chart-cycles"></canvas>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
-    const el = id => document.getElementById(id);
-    let chart, lastTs = '';
+const qs = sel => document.querySelector(sel);
 
-    async function fetchJSON(url){
-      const res = await fetch(url + (url.includes('?')?'&':'?') + '_=' + Date.now(), {
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+// Simple MA smoother
+const sma = (arr, w=3) => {
+  if (w <= 1) return arr.slice();
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const s = Math.max(0, i - w + 1);
+    const chunk = arr.slice(s, i + 1);
+    out.push(chunk.reduce((a, b) => a + b, 0) / chunk.length);
+  }
+  return out;
+};
+
+// Improved jget function with better error handling
+async function jget(url) {
+  try {
+    const response = await fetch(url + (url.includes('?') ? '&' : '?') + 'bust=' + Date.now());
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error ${response.status}: ${errorText.slice(0, 100)}...`);
+    }
+    const contentType = response.headers.get('Content-Type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const errorText = await response.text();
+      throw new Error(`Invalid content type: ${contentType}, received: ${errorText.slice(0, 100)}...`);
+    }
+    return await response.json();
+  } catch (e) {
+    console.error(`Fetch error for ${url}:`, e.message);
+    throw e;
+  }
+}
+
+function newLineChart(ctx, label) {
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label, data: [], borderWidth: 2, fill: false, tension: 0.2 }] },
+    options: {
+      responsive: true,
+      scales: { x: { ticks: { maxRotation: 0, autoSkip: true } }, y: { beginAtZero: false } },
+      plugins: { legend: { display: true } }
+    }
+  });
+}
+
+const charts = {
+  temp: newLineChart(qs('#chart-temp'), 'Temperature (°C)'),
+  current: newLineChart(qs('#chart-current'), 'Current (A)'),
+  level: newLineChart(qs('#chart-level'), 'Level (cm)'),
+  cycles: newLineChart(qs('#chart-cycles'), 'Cycles (cpm)')
+};
+
+async function loadLatest() {
+  try {
+    const j = await jget('/api/latest/');
+    if (j.temp) {
+      qs('#kpi-tempc').textContent = j.temp.value?.toFixed?.(2) ?? j.temp.value ?? '—';
+      qs('#kpi-tempf').textContent = j.temp.temp_f ?? '—';
+      qs('#kpi-tempc-ts').textContent = j.temp.timestamp ?? '—';
+    }
+    if (j.current) {
+      qs('#kpi-amps').textContent = j.current.value ?? '—';
+      qs('#kpi-amps-ts').textContent = j.current.timestamp ?? '—';
+    }
+    if (j.level) {
+      qs('#kpi-level').textContent = j.level.value ?? '—';
+      qs('#kpi-level-pct').textContent = j.level.percent ?? '—';
+      qs('#kpi-level-ts').textContent = j.level.timestamp ?? '—';
+    }
+  } catch (e) {
+    console.error('Failed to load latest data:', e);
+    qs('#kpi-tempc').textContent = 'Error';
+    qs('#kpi-tempf').textContent = 'Error';
+    qs('#kpi-amps').textContent = 'Error';
+    qs('#kpi-level').textContent = 'Error';
+    qs('#kpi-level-pct').textContent = 'Error';
+    qs('#kpi-tempc-ts').textContent = 'API unavailable';
+    qs('#kpi-amps-ts').textContent = 'API unavailable';
+    qs('#kpi-level-ts').textContent = 'API unavailable';
+  }
+}
+
+async function loadHistoryAll(hours) {
+  const limit = Math.max(30, Math.min(1440, hours * 60));
+  const smooth = qs('#smoothToggle').checked;
+  const metrics = ['temp', 'current', 'level', 'cycles'];
+
+  for (const m of metrics) {
+    try {
+      const j = await jget(`/api/history/?metric=${m}&limit=${limit}`);
+      const labels = j.items.map(it => it.timestamp?.replace('T', ' ').slice(0, 19));
+      const values = j.items.map(it => Number(it.value));
+      const series = smooth ? sma(values, 3) : values;
+
+      charts[m].data.labels = labels;
+      charts[m].data.datasets[0].data = series;
+      charts[m].update();
+    } catch (e) {
+      console.error(`Failed to load history for ${m}:`, e);
+      charts[m].data.labels = [];
+      charts[m].data.datasets[0].data = [];
+      charts[m].update();
+    }
+  }
+}
+
+function initRange() {
+  const btns = [...document.querySelectorAll('.btn[data-range]')];
+  btns.forEach(b => b.addEventListener('click', () => {
+    btns.forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    const h = Number(b.dataset.range || '4');
+    loadHistoryAll(h);
+  }));
+  qs('#smoothToggle').addEventListener('change', () => {
+    const active = document.querySelector('.btn[data-range].active');
+    const h = Number(active?.dataset.range || '4');
+    loadHistoryAll(h);
+  });
+}
+
+// Define window.reloadDashboard for Firebase switcher
+window.reloadDashboard = async () => {
+  await loadLatest();
+  const active = document.querySelector('.btn[data-range].active');
+  const h = Number(active?.dataset.range || '4');
+  await loadHistoryAll(h);
+};
+
+// Firebase Switcher Logic
+(function() {
+  const label = document.getElementById('fb-active');
+  const btnP = document.getElementById('fb-to-primary');
+  const btnS = document.getElementById('fb-to-secondary');
+
+  async function refreshActive() {
+    try {
+      const r = await fetch('/api/firebase/active/');
+      if (!r.ok) {
+        const errorText = await r.text();
+        throw new Error(`HTTP error ${r.status}: ${errorText.slice(0, 100)}...`);
+      }
+      const contentType = r.headers.get('Content-Type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const errorText = await r.text();
+        throw new Error(`Invalid content type: ${contentType}, received: ${errorText.slice(0, 100)}...`);
+      }
+      const j = await r.json();
+      label.textContent = j.active || '—';
+      btnP.disabled = (j.active === 'primary') || j.available?.primary === false;
+      btnS.disabled = (j.active === 'secondary') || j.available?.secondary === false;
+    } catch (e) {
+      console.error('Failed to refresh Firebase active state:', e);
+      label.textContent = 'Error';
+    }
+  }
+
+  async function switchTo(target) {
+    try {
+      btnP.disabled = btnS.disabled = true;
+      const response = await fetch('/api/firebase/active/set/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: target })
       });
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      return res.json();
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error ${response.status}: ${errorText.slice(0, 100)}...`);
+      }
+    } catch (e) {
+      console.error(`Failed to switch to ${target}:`, e);
+      alert('Switch error: ' + e.message);
+    } finally {
+      await refreshActive();
+      if (window.reloadDashboard) window.reloadDashboard();
+      else location.reload();
     }
+  }
 
-    function fmtTime(iso){
-      const d = new Date(iso);
-      return d.toLocaleTimeString('th-TH', { hour12: false }); // HH:mm:ss
-    }
+  btnP.onclick = () => switchTo('primary');
+  btnS.onclick = () => switchTo('secondary');
+  refreshActive();
+})();
 
-    async function loadTemp(){
-      try{
-        const j = await fetchJSON('/api/temp/');
-        el('tempC').textContent = (j.temp_c?.toFixed ? j.temp_c.toFixed(2) : j.temp_c);
-        el('tempF').textContent = (j.temp_f?.toFixed ? j.temp_f.toFixed(2) : j.temp_f);
-        el('updated').textContent = j.timestamp || '–';
-        if (j.timestamp && j.timestamp !== lastTs) { lastTs = j.timestamp; el('tempC').style.opacity = 0.5; setTimeout(()=> el('tempC').style.opacity = 1, 200); }
-      }catch(e){ console.error('temp error:', e); }
-    }
+(async function() {
+  initRange();
+  await loadLatest();
+  await loadHistoryAll(4);
 
-    async function loadHistory(){
-      try{
-        const h = await fetchJSON('/api/history/?limit=240');
-        const labels = (h.items||[]).map(i => fmtTime(i.timestamp));
-        const data = (h.items||[]).map(i => i.temp_c);
-        const min = Math.min(...data), max = Math.max(...data);
-
-        if(!chart){
-          chart = new Chart(document.getElementById('chart'), {
-            type:'line',
-            data:{ labels, datasets:[{ label:'Temperature (°C)', data, borderWidth:2, tension:0.3, pointRadius:0 }] },
-            options:{
-              interaction:{ mode:'index', intersect:false },
-              scales:{
-                x:{ ticks:{ maxTicksLimit: 10 } },
-                y:{ beginAtZero:false, suggestedMin: min - 0.5, suggestedMax: max + 0.5 }
-              }
-            }
-          });
-        }else{
-          chart.data.labels = labels;
-          chart.data.datasets[0].data = data;
-          chart.options.scales.y.suggestedMin = min - 0.5;
-          chart.options.scales.y.suggestedMax = max + 0.5;
-          chart.update();
-        }
-      }catch(e){ console.error('history error:', e); }
-    }
-
-    async function boot(){
-      await loadHistory();              // กราฟครั้งแรก
-      await loadTemp();                 // ค่า current ครั้งแรก
-      setInterval(loadTemp, 10000);     // ให้ตรงกับ collector (10 วิ)
-      setInterval(loadHistory, 60000);  // รีโหลดกราฟทุก 60 วิ
-    }
-    boot();
-  </script>
+  setInterval(loadLatest, 10000); // 10s
+  setInterval(() => {
+    const active = document.querySelector('.btn[data-range].active');
+    const h = Number(active?.dataset.range || '4');
+    loadHistoryAll(h);
+  }, 60000); // 60s
+})();
+</script>
 </body>
 </html>

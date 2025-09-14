@@ -1,0 +1,19 @@
+[0;1;32m●[0m temp-collector.service - Temp Collector -> Firestore
+     Loaded: loaded (]8;;file://raspberrypi/etc/systemd/system/temp-collector.service/etc/systemd/system/temp-collector.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Sun 2025-09-14 06:50:38 +07; 1min 33s ago
+   Main PID: 9866 (python)
+      Tasks: 8[0;38;5;245m (limit: 4695)[0m
+        CPU: 1.086s
+     CGroup: /system.slice/temp-collector.service
+             └─[0;38;5;245m9866 /home/pi/projects/max6675/.venv/bin/python -m sensor.collector[0m
+
+Sep 14 06:51:18 raspberrypi python[9866]: [latest->primary] temp_c=32.95
+Sep 14 06:51:19 raspberrypi python[9866]: [reading+minutes->primary] min/avg/max = 32.05/32.61/33.18
+Sep 14 06:51:21 raspberrypi python[9866]: [latest->primary] temp_c=33.26
+Sep 14 06:51:32 raspberrypi python[9866]: [latest->primary] temp_c=33.54
+Sep 14 06:51:37 raspberrypi python[9866]: [latest->primary] temp_c=33.87
+Sep 14 06:51:40 raspberrypi python[9866]: [reading+minutes->primary] min/avg/max = 33.06/33.48/33.94
+Sep 14 06:51:47 raspberrypi python[9866]: [latest->primary] temp_c=34.21
+Sep 14 06:51:57 raspberrypi python[9866]: [latest->primary] temp_c=34.56
+Sep 14 06:52:00 raspberrypi python[9866]: [reading+minutes->primary] min/avg/max = 33.76/34.2/34.56
+Sep 14 06:52:07 raspberrypi python[9866]: [latest->primary] temp_c=34.79
