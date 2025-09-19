@@ -3,298 +3,369 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Temperature Dashboard (device: {{ device_id }})</title>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <title>IoT Sensor Dashboard — {{ device_id }}</title>
+
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
   <style>
-    :root { --card-bg:#fff; --muted:#6b7280; --line:#e5e7eb; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f7f7f8; }
-    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
-    h1 { margin: 0 0 16px; }
-    .grid { display: grid; gap: 16px; }
-    .cards { grid-template-columns: repeat(4, minmax(0,1fr)); }
-    .card { background: var(--card-bg); border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    .kpi-label { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
-    .kpi-value { font-size: 44px; font-weight: 800; line-height: 1.1; }
-    .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
-    .panel { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-    .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-    .btn { border: 1px solid var(--line); background: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer }
-    .btn.active { background: #111; color: #fff; border-color: #111; }
-    .btn-sm { padding: 4px 8px; font-size: 12px; }
-    .muted { color: var(--muted) }
-    canvas { width: 100%; height: 320px; }
-    @media(max-width:1024px) { .cards { grid-template-columns: repeat(2,1fr); } }
-    @media(max-width:640px) { .cards { grid-template-columns: 1fr; } }
+    :root{
+      --bg:#f6f7f8; --card:#ffffff; --muted:#6b7280; --line:#e5e7eb; --ink:#111827;
+      /* palette (สวยและอ่านง่าย) */
+      --temp:#f97316;   /* orange  */
+      --amps:#0ea5e9;   /* sky     */
+      --cycles:#8b5cf6; /* violet  */
+      --level:#22c55e;  /* green   */
+      --tick:#94a3b8; --grid:#e5e7eb;
+    }
+    *{box-sizing:border-box}
+    html{color-scheme:light}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{max-width:1280px;margin:18px auto;padding:0 16px}
+
+    /* Top bar */
+    .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    h1{margin:0 8px 0 0;font-size:22px}
+    .sub{font-size:12px;color:var(--muted)}
+    .right{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .btn{border:1px solid var(--line);background:#fff;padding:6px 10px;border-radius:10px;cursor:pointer;font-size:12px}
+    .btn.active{background:#111;color:#fff;border-color:#111}
+    .badge{padding:2px 8px;border-radius:999px;font-size:11px;background:#eef2ff;color:#4338ca}
+
+    /* KPI cards */
+    .grid{display:grid;gap:12px}
+    .cards{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px}
+    @media(max-width:1024px){.cards{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:640px){.cards{grid-template-columns:1fr}}
+    .card{background:var(--card);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.06);padding:12px}
+    .k-label{font-size:12px;color:var(--muted)}
+    .k-value{font-size:28px;font-weight:800;margin-top:4px}
+    .k-sub{font-size:11px;color:var(--muted);margin-top:4px}
+    .chip{font-size:11px;padding:2px 8px;border-radius:999px;background:#e5f6ed;color:#16a34a;font-weight:700}
+
+    /* Chart panels */
+    .panel{background:var(--card);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.06);padding:10px}
+    .two{grid-template-columns:1fr 1fr}
+    .panel h3{margin:0 0 6px 2px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+    .chart-wrap{height:210px}
+    canvas{width:100%;height:100%;background:#fff;border-radius:10px}
+
+    /* Footer */
+    .footer{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px;margin-top:10px}
+    .ok{color:#16a34a}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Temperature Dashboard <span class="muted">(Device: {{ device_id }})</span></h1>
+    <div class="topbar">
+      <h1>IoT Sensor Dashboard</h1>
+      <div class="sub">Device: <b>{{ device_id }}</b> • Real-time monitoring</div>
+      <div class="badge" id="now-str">—</div>
 
-    <!-- KPI cards -->
-    <div class="grid cards">
-      <div class="card">
-        <div class="kpi-label">Temp (°C)</div>
-        <div id="kpi-tempc" class="kpi-value">—</div>
-        <div class="kpi-sub">Updated: <span id="kpi-tempc-ts">—</span></div>
-      </div>
-      <div class="card">
-        <div class="kpi-label">Temp (°F)</div>
-        <div id="kpi-tempf" class="kpi-value">—</div>
-        <div class="kpi-sub">&nbsp;</div>
-      </div>
-      <div class="card">
-        <div class="kpi-label">Current (A)</div>
-        <div id="kpi-amps" class="kpi-value">—</div>
-        <div class="kpi-sub">Updated: <span id="kpi-amps-ts">—</span></div>
-      </div>
-      <div class="card">
-        <div class="kpi-label">Level (cm / %)</div>
-        <div class="kpi-value"><span id="kpi-level">—</span> <span class="muted">/</span> <span id="kpi-level-pct">—</span>%</div>
-        <div class="kpi-sub">Updated: <span id="kpi-level-ts">—</span></div>
+      <div class="right">
+        <button class="btn range active" data-hours="1">1h</button>
+        <button class="btn range" data-hours="4">4h</button>
+        <button class="btn range" data-hours="24">24h</button>
+
+        <button id="btn-refresh" class="btn" title="Refresh">⟳</button>
+        <button id="btn-auto" class="btn" title="Toggle auto refresh">Auto: ON</button>
+        <button id="btn-csv" class="btn" title="Download CSV">⬇ CSV</button>
+
+        <span class="sub">Firebase: <b id="fb-active">—</b></span>
+        <button id="fb-to-primary"  class="btn">Primary</button>
+        <button id="fb-to-secondary" class="btn">Secondary</button>
       </div>
     </div>
 
-    <!-- Range -->
-    <div class="panel" style="margin-top:16px">
-      <div class="toolbar">
-        <div><strong>Range:</strong></div>
-        <button class="btn" data-range="1">1h</button>
-        <button class="btn active" data-range="4">4h</button>
-        <button class="btn" data-range="24">24h</button>
-        <label style="margin-left:auto" class="muted">
-          <input type="checkbox" id="smoothToggle"> Smooth (×3 MA)
-        </label>
+    <!-- KPI CARDS -->
+    <div class="grid cards">
+      <div class="card">
+        <div class="k-label">Temperature</div>
+        <div class="k-value"><span id="k-tempc">—</span><span style="font-weight:600">°C</span></div>
+        <div class="k-sub"><span id="k-tempf">—</span>°F • <span id="k-temp-badge" class="chip" style="display:none"></span></div>
       </div>
+      <div class="card">
+        <div class="k-label">Current</div>
+        <div class="k-value"><span id="k-amps">—</span><span style="font-weight:600">A</span></div>
+        <div class="k-sub"><span id="k-amps-status" class="chip" style="display:none"></span></div>
+      </div>
+      <div class="card">
+        <div class="k-label">Cycles</div>
+        <div class="k-value"><span id="k-cycles">—</span></div>
+        <div class="k-sub"><span id="k-cycles-status" class="chip" style="display:none"></span></div>
+      </div>
+      <div class="card">
+        <div class="k-label">Level</div>
+        <div class="k-value"><span id="k-level">—</span><span style="font-weight:600">cm</span></div>
+        <div class="k-sub"><span id="k-level-pct">—</span>% • <span id="k-level-status" class="chip" style="display:none"></span></div>
+      </div>
+    </div>
 
-      <!-- Firebase Switcher -->
-      <div id="fb-switch" style="display:flex;gap:.5rem;align-items:center;margin:8px 0 12px;">
-        <span>Firebase:</span>
-        <span id="fb-active" style="font-weight:700;">—</span>
-        <button id="fb-to-primary" class="btn btn-sm">Primary</button>
-        <button id="fb-to-secondary" class="btn btn-sm">Secondary</button>
+    <!-- CHARTS -->
+    <div class="grid two" style="margin-top:12px">
+      <div class="panel">
+        <h3>🌡️ Temperature Trend</h3>
+        <div class="chart-wrap"><canvas id="c-temp"></canvas></div>
       </div>
+      <div class="panel">
+        <h3>⚡ Current Flow</h3>
+        <div class="chart-wrap"><canvas id="c-current"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>🔁 Cycle Rate</h3>
+        <div class="chart-wrap"><canvas id="c-cycles"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>📏 Level Monitoring</h3>
+        <div class="chart-wrap"><canvas id="c-level"></canvas></div>
+      </div>
+    </div>
 
-      <!-- 4 charts -->
-      <div class="grid" style="grid-template-columns:1fr; gap:24px">
-        <div>
-          <div class="muted" style="margin-bottom:6px">Temperature (°C)</div>
-          <canvas id="chart-temp"></canvas>
-        </div>
-        <div>
-          <div class="muted" style="margin-bottom:6px">Current (A)</div>
-          <canvas id="chart-current"></canvas>
-        </div>
-        <div>
-          <div class="muted" style="margin-bottom:6px">Level (cm)</div>
-          <canvas id="chart-level"></canvas>
-        </div>
-        <div>
-          <div class="muted" style="margin-bottom:6px">Cycles (cpm)</div>
-          <canvas id="chart-cycles"></canvas>
-        </div>
-      </div>
+    <div class="footer">
+      <span>• Live Data</span>
+      <span>Last updated: <span id="last-upd">—</span></span>
+      <span>Records: <span id="rec-count">0</span></span>
+      <span>Device Status: <span id="dev-status" class="ok">Online</span></span>
+      <span>Uptime: <span id="uptime">—</span></span>
     </div>
   </div>
 
-  <script>
-const qs = sel => document.querySelector(sel);
+<script>
+/* ========== Utils & theme ========== */
+const $ = (q)=>document.querySelector(q);
+const nowLbl = ()=>{
+  const d = new Date();
+  $('#now-str').textContent = d.toLocaleString(undefined,{hour12:false}) +
+    ' (' + Intl.DateTimeFormat().resolvedOptions().timeZone + ')';
+};
+setInterval(nowLbl, 1000); nowLbl();
 
-// Simple MA smoother
-const sma = (arr, w=3) => {
-  if (w <= 1) return arr.slice();
-  const out = [];
-  for (let i = 0; i < arr.length; i++) {
-    const s = Math.max(0, i - w + 1);
-    const chunk = arr.slice(s, i + 1);
-    out.push(chunk.reduce((a, b) => a + b, 0) / chunk.length);
-  }
-  return out;
+const fmtTS = (s)=> s ? new Date(s).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
+const css = getComputedStyle(document.documentElement);
+const PAL = {
+  temp:   css.getPropertyValue('--temp').trim()   || '#f97316',
+  amps:   css.getPropertyValue('--amps').trim()   || '#0ea5e9',
+  cycles: css.getPropertyValue('--cycles').trim() || '#8b5cf6',
+  level:  css.getPropertyValue('--level').trim()  || '#22c55e',
+  tick:   css.getPropertyValue('--tick').trim()   || '#94a3b8',
+  grid:   css.getPropertyValue('--grid').trim()   || '#e5e7eb',
 };
 
-// Improved jget function with better error handling
-async function jget(url) {
-  try {
-    const response = await fetch(url + (url.includes('?') ? '&' : '?') + 'bust=' + Date.now());
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP error ${response.status}: ${errorText.slice(0, 100)}...`);
-    }
-    const contentType = response.headers.get('Content-Type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const errorText = await response.text();
-      throw new Error(`Invalid content type: ${contentType}, received: ${errorText.slice(0, 100)}...`);
-    }
-    return await response.json();
-  } catch (e) {
-    console.error(`Fetch error for ${url}:`, e.message);
-    throw e;
+function addAlpha(hexOrRgb, a){
+  if(hexOrRgb.startsWith('#')){
+    const c = hexOrRgb.length===4
+      ? hexOrRgb.slice(1).split('').map(h=>h+h).join('')
+      : hexOrRgb.slice(1);
+    const r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16);
+    return `rgba(${r},${g},${b},${a})`;
   }
+  if(hexOrRgb.startsWith('rgb')){
+    const m = hexOrRgb.match(/rgba?\(([^)]+)\)/);
+    if(!m) return hexOrRgb;
+    const [r,g,b] = m[1].split(',').slice(0,3).map(x=>+x.trim());
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return hexOrRgb;
 }
 
-function newLineChart(ctx, label) {
-  return new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [{ label, data: [], borderWidth: 2, fill: false, tension: 0.2 }] },
-    options: {
-      responsive: true,
-      scales: { x: { ticks: { maxRotation: 0, autoSkip: true } }, y: { beginAtZero: false } },
-      plugins: { legend: { display: true } }
+function areaConfig(label, lineColor){
+  return {
+    type:'line',
+    data:{labels:[], datasets:[{
+      label, data:[], borderColor:lineColor, borderWidth:2, fill:true,
+      backgroundColor:(ctx)=>{
+        const chart = ctx.chart; const area = chart.chartArea;
+        if(!area) return addAlpha(lineColor, .0);
+        const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+        g.addColorStop(0, addAlpha(lineColor, .22));
+        g.addColorStop(1, addAlpha(lineColor, 0));
+        return g;
+      },
+      tension:.25, pointRadius:0, pointHitRadius:8, spanGaps:true,
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation:{duration:600, easing:'easeOutQuart'},
+      interaction:{mode:'index', intersect:false},
+      parsing:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          displayColors:false,
+          callbacks:{ label:(it)=> `${label}: ${Number(it.parsed.y).toFixed(2)}` }
+        },
+        decimation:{ enabled:true, algorithm:'lttb', samples:60 },
+      },
+      scales:{
+        x:{ grid:{display:false}, ticks:{color:PAL.tick, maxRotation:0, autoSkip:true, maxTicksLimit:8} },
+        y:{ grid:{color:PAL.grid},   ticks:{color:PAL.tick, maxTicksLimit:4} }
+      }
     }
-  });
+  };
 }
 
+/* ========== Build charts ========== */
 const charts = {
-  temp: newLineChart(qs('#chart-temp'), 'Temperature (°C)'),
-  current: newLineChart(qs('#chart-current'), 'Current (A)'),
-  level: newLineChart(qs('#chart-level'), 'Level (cm)'),
-  cycles: newLineChart(qs('#chart-cycles'), 'Cycles (cpm)')
+  temp:    new Chart($('#c-temp'),    areaConfig('Temp (°C)', PAL.temp)),
+  current: new Chart($('#c-current'), areaConfig('Current (A)', PAL.amps)),
+  cycles:  new Chart($('#c-cycles'),  areaConfig('Cycles (cpm)', PAL.cycles)),
+  level:   new Chart($('#c-level'),   areaConfig('Level (cm)', PAL.level)),
 };
 
-async function loadLatest() {
-  try {
-    const j = await jget('/api/latest/');
-    if (j.temp) {
-      qs('#kpi-tempc').textContent = j.temp.value?.toFixed?.(2) ?? j.temp.value ?? '—';
-      qs('#kpi-tempf').textContent = j.temp.temp_f ?? '—';
-      qs('#kpi-tempc-ts').textContent = j.temp.timestamp ?? '—';
-    }
-    if (j.current) {
-      qs('#kpi-amps').textContent = j.current.value ?? '—';
-      qs('#kpi-amps-ts').textContent = j.current.timestamp ?? '—';
-    }
-    if (j.level) {
-      qs('#kpi-level').textContent = j.level.value ?? '—';
-      qs('#kpi-level-pct').textContent = j.level.percent ?? '—';
-      qs('#kpi-level-ts').textContent = j.level.timestamp ?? '—';
-    }
-  } catch (e) {
-    console.error('Failed to load latest data:', e);
-    qs('#kpi-tempc').textContent = 'Error';
-    qs('#kpi-tempf').textContent = 'Error';
-    qs('#kpi-amps').textContent = 'Error';
-    qs('#kpi-level').textContent = 'Error';
-    qs('#kpi-level-pct').textContent = 'Error';
-    qs('#kpi-tempc-ts').textContent = 'API unavailable';
-    qs('#kpi-amps-ts').textContent = 'API unavailable';
-    qs('#kpi-level-ts').textContent = 'API unavailable';
-  }
+let autoOn=true, lastHours=1, lastHistoryCache={};
+
+/* ========== Fetch helper ========== */
+async function jget(url){
+  const r = await fetch(url + (url.includes('?')?'&':'?') + 'bust=' + Date.now());
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const ct = r.headers.get('Content-Type')||'';
+  if(!ct.includes('application/json')) throw new Error('Bad content-type');
+  return r.json();
 }
 
-async function loadHistoryAll(hours) {
-  const limit = Math.max(30, Math.min(1440, hours * 60));
-  const smooth = qs('#smoothToggle').checked;
-  const metrics = ['temp', 'current', 'level', 'cycles'];
+/* ========== Latest (KPI) ========== */
+async function loadLatest(){
+  try{
+    const j = await jget('/api/latest/');
+    const tv = Number(j.temp?.value);
+    $('#k-tempc').textContent = Number.isFinite(tv)? tv.toFixed(2) : '—';
+    $('#k-tempf').textContent = j.temp?.temp_f ?? '—';
 
-  for (const m of metrics) {
-    try {
-      const j = await jget(`/api/history/?metric=${m}&limit=${limit}`);
-      const labels = j.items.map(it => it.timestamp?.replace('T', ' ').slice(0, 19));
-      const values = j.items.map(it => Number(it.value));
-      const series = smooth ? sma(values, 3) : values;
+    const tb = $('#k-temp-badge');
+    if(Number.isFinite(tv)){
+      if(tv < 5){ tb.textContent='Low'; tb.style.display='inline-block'; tb.style.background='#e0f2fe'; tb.style.color='#0369a1'; }
+      else if(tv > 45){ tb.textContent='High'; tb.style.display='inline-block'; tb.style.background='#fee2e2'; tb.style.color='#b91c1c'; }
+      else { tb.textContent='Normal'; tb.style.display='inline-block'; tb.style.background='#e5f6ed'; tb.style.color='#16a34a'; }
+    }
+
+    const av = Number(j.current?.value);
+    $('#k-amps').textContent = Number.isFinite(av)? av.toFixed(2) : '—';
+    const ab = $('#k-amps-status');
+    if(Number.isFinite(av)){
+      const hi = av>10;
+      ab.textContent = hi ? 'High' : 'Normal';
+      ab.style.display='inline-block';
+      ab.style.background = hi ? '#fee2e2' : '#e5f6ed';
+      ab.style.color      = hi ? '#b91c1c' : '#16a34a';
+    }
+
+    $('#k-level').textContent = j.level?.value ?? '—';
+    $('#k-level-pct').textContent = j.level?.percent ?? '—';
+    const lb = $('#k-level-status');
+    if(j.level?.percent != null){
+      const p = Number(j.level.percent);
+      lb.textContent = (p<20?'Low': p>90?'High':'Normal');
+      lb.style.display='inline-block';
+      lb.style.background = (p<20||p>90)?'#fff7ed':'#e5f6ed';
+      lb.style.color      = (p<20||p>90)?'#b45309':'#16a34a';
+    }
+
+    $('#k-cycles').textContent = Number(j.cycles?.value ?? NaN) || '—';
+    $('#k-cycles-status').textContent = 'Active';
+    $('#k-cycles-status').style.display='inline-block';
+
+    const ts = j.temp?.timestamp || j.current?.timestamp || j.level?.timestamp;
+    $('#last-upd').textContent = ts ? new Date(ts).toLocaleString() : '—';
+  }catch(e){ /* แกล้งเงียบเพื่อประหยัด read */ }
+}
+
+/* ========== History (กราฟ) ========== */
+async function loadHistory(hours){
+  lastHours = hours;
+  const metrics = ['temp','current','level','cycles'];
+  let total = 0;
+  for(const m of metrics){
+    try{
+      const j = await jget(`/api/history/?metric=${m}&hours=${hours}`);
+      lastHistoryCache[m] = j.items || [];
+      total += j.count || (j.items?.length||0);
+
+      const labels = (j.items||[]).map(x=>fmtTS(x.timestamp));
+      const values = (j.items||[]).map(x=>Number(x.value));
 
       charts[m].data.labels = labels;
-      charts[m].data.datasets[0].data = series;
+      charts[m].data.datasets[0].data = values;
       charts[m].update();
-    } catch (e) {
-      console.error(`Failed to load history for ${m}:`, e);
+    }catch(e){
       charts[m].data.labels = [];
       charts[m].data.datasets[0].data = [];
       charts[m].update();
     }
   }
+  $('#rec-count').textContent = total;
 }
 
-function initRange() {
-  const btns = [...document.querySelectorAll('.btn[data-range]')];
-  btns.forEach(b => b.addEventListener('click', () => {
-    btns.forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    const h = Number(b.dataset.range || '4');
-    loadHistoryAll(h);
-  }));
-  qs('#smoothToggle').addEventListener('change', () => {
-    const active = document.querySelector('.btn[data-range].active');
-    const h = Number(active?.dataset.range || '4');
-    loadHistoryAll(h);
+/* ========== CSV ========== */
+function downloadCSV(){
+  const rows = [['Timestamp','Temperature (°C)','Current (A)','Cycles (cpm)','Level (cm)'].join(',')];
+
+  // สมมุติว่าแต่ละ metric มี timestamp เดียวกัน (จาก minutes rollup)
+  // ถ้าไม่ตรง แก้ฝั่ง backend aggregate ให้ตรงคีย์เดียวกันจะสวยสุด
+  const map = new Map();
+  for(const it of (lastHistoryCache.temp||[]))       map.set(it.timestamp, {t:it.value});
+  for(const it of (lastHistoryCache.current||[])) { const r=map.get(it.timestamp)||{}; r.a=it.value; map.set(it.timestamp,r); }
+  for(const it of (lastHistoryCache.cycles||[]))  { const r=map.get(it.timestamp)||{}; r.c=it.value; map.set(it.timestamp,r); }
+  for(const it of (lastHistoryCache.level||[]))   { const r=map.get(it.timestamp)||{}; r.l=it.value; map.set(it.timestamp,r); }
+
+  [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([ts,v])=>{
+    rows.push([ts, v.t??'', v.a??'', v.c??'', v.l??''].join(','));
   });
+
+  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `history_{{ device_id }}_${lastHours}h.csv`.replace(/\s+/g,'');
+  a.click(); URL.revokeObjectURL(a.href);
 }
 
-// Define window.reloadDashboard for Firebase switcher
-window.reloadDashboard = async () => {
+/* ========== Firebase switcher ========== */
+async function refreshActive(){
+  try{
+    const j = await jget('/api/firebase/active/');
+    $('#fb-active').textContent = j.active || '—';
+    $('#fb-to-primary').disabled  = (j.active==='primary')  || j.available?.primary===false;
+    $('#fb-to-secondary').disabled= (j.active==='secondary')|| j.available?.secondary===false;
+  }catch{ $('#fb-active').textContent='—'; }
+}
+async function switchTo(target){
+  try{
+    $('#fb-to-primary').disabled = $('#fb-to-secondary').disabled = true;
+    const r = await fetch(`/api/firebase/active/set/?to=${encodeURIComponent(target)}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'switch failed');
+  }catch(e){ alert('Switch error: '+e.message); }
+  finally{ await refreshActive(); await loadLatest(); }
+}
+
+/* ========== Auto refresh ========== */
+let tKpi=0;
+function setupAuto(){
+  clearInterval(tKpi);
+  if(!autoOn) return;
+  tKpi = setInterval(loadLatest, 30_000); // KPI 30s
+}
+
+/* ========== UI bindings ========== */
+document.querySelectorAll('.btn.range').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.btn.range').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    loadHistory(Number(b.dataset.hours||'4'));
+  };
+});
+$('#btn-refresh').onclick=()=>{ loadLatest(); loadHistory(lastHours); };
+$('#btn-auto').onclick=()=>{ autoOn=!autoOn; $('#btn-auto').textContent='Auto: '+(autoOn?'ON':'OFF'); setupAuto(); };
+$('#btn-csv').onclick=downloadCSV;
+$('#fb-to-primary').onclick = ()=>switchTo('primary');
+$('#fb-to-secondary').onclick = ()=>switchTo('secondary');
+
+/* ========== Kickoff ========== */
+(async()=>{
+  await refreshActive();
   await loadLatest();
-  const active = document.querySelector('.btn[data-range].active');
-  const h = Number(active?.dataset.range || '4');
-  await loadHistoryAll(h);
-};
-
-// Firebase Switcher Logic
-(function() {
-  const label = document.getElementById('fb-active');
-  const btnP = document.getElementById('fb-to-primary');
-  const btnS = document.getElementById('fb-to-secondary');
-
-  async function refreshActive() {
-    try {
-      const r = await fetch('/api/firebase/active/');
-      if (!r.ok) {
-        const errorText = await r.text();
-        throw new Error(`HTTP error ${r.status}: ${errorText.slice(0, 100)}...`);
-      }
-      const contentType = r.headers.get('Content-Type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const errorText = await r.text();
-        throw new Error(`Invalid content type: ${contentType}, received: ${errorText.slice(0, 100)}...`);
-      }
-      const j = await r.json();
-      label.textContent = j.active || '—';
-      btnP.disabled = (j.active === 'primary') || j.available?.primary === false;
-      btnS.disabled = (j.active === 'secondary') || j.available?.secondary === false;
-    } catch (e) {
-      console.error('Failed to refresh Firebase active state:', e);
-      label.textContent = 'Error';
-    }
-  }
-
-  async function switchTo(target) {
-    try {
-      btnP.disabled = btnS.disabled = true;
-      const response = await fetch('/api/firebase/active/set/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: target })
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error ${response.status}: ${errorText.slice(0, 100)}...`);
-      }
-    } catch (e) {
-      console.error(`Failed to switch to ${target}:`, e);
-      alert('Switch error: ' + e.message);
-    } finally {
-      await refreshActive();
-      if (window.reloadDashboard) window.reloadDashboard();
-      else location.reload();
-    }
-  }
-
-  btnP.onclick = () => switchTo('primary');
-  btnS.onclick = () => switchTo('secondary');
-  refreshActive();
-})();
-
-(async function() {
-  initRange();
-  await loadLatest();
-  await loadHistoryAll(4);
-
-  setInterval(loadLatest, 10000); // 10s
-  setInterval(() => {
-    const active = document.querySelector('.btn[data-range].active');
-    const h = Number(active?.dataset.range || '4');
-    loadHistoryAll(h);
-  }, 60000); // 60s
+  await loadHistory(1);
+  setupAuto();
 })();
 </script>
 </body>
