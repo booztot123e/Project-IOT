@@ -1,5 +1,6 @@
 # sensor/views.py
 import os
+import sqlite3
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,7 @@ from .firebase_admin_init import get_fs, get_active
 DEVICE_ID = os.getenv("DEVICE_ID", "pi5-001")
 FB_TOGGLE_PATH = os.getenv("FB_TOGGLE_PATH", "/var/lib/tempmon/firebase-active")
 LOCAL_LAST_JSON = os.getenv("LOCAL_LAST_JSON", "/tmp/last_temp.json")
+DB_PATH = os.getenv("DB", "/var/lib/tempmon/data.sqlite")
 
 # ----- Firestore helpers / constants -----
 try:
@@ -179,6 +181,58 @@ def latest_api(request: HttpRequest):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+# ---- Local SQLite latest for dashboard ----
+
+def latest_local(request):
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("SELECT ts_ms,temp,current,level,cycles FROM readings ORDER BY ts_ms DESC LIMIT 1")
+    row = cur.fetchone(); conn.close()
+    if not row: return JsonResponse({"ok": False, "reason": "no_data"}, status=404)
+    ts_ms, t, a, lvl, cyc = row
+    return JsonResponse({"ok": True, "source":"local","ts_ms": ts_ms, "temp": t, "current": a, "level": lvl, "cycles": cyc})
+
+@require_GET
+def minutes_api(request):
+    from datetime import datetime, timedelta, timezone
+    import os
+    from django.http import JsonResponse
+
+    DEVICE_ID = os.getenv("DEVICE_ID", "pi5-001")
+
+    try:
+        hours = max(1, min(int(request.GET.get("hours", "1")), 48))
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        start_id = since.strftime("%Y%m%d%H%M")  # YYYYMMDDHHmm (UTC)
+
+        from google.cloud import firestore
+        db = firestore.Client()
+        coll = db.collection("devices").document(DEVICE_ID).collection("minutes")
+
+        # ✅ ใช้ DocumentReference กับ "__name__"
+        start_ref = coll.document(start_id)
+        q = coll.where("__name__", ">=", start_ref).order_by("__name__")
+
+        docs = list(q.stream())
+
+        rows = []
+        for d in docs:
+            x = d.to_dict() or {}
+            ts = datetime.strptime(d.id, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+            t_ms = int(ts.timestamp() * 1000)
+            rows.append({
+                "t_ms":   t_ms,
+                "temp":    (x.get("temp",   {}).get("avg")    or x.get("temp",   {}).get("last")),
+                "current": (x.get("current",{}).get("avg")    or x.get("current",{}).get("last")),
+                "level":   (x.get("level",  {}).get("avg")    or x.get("level",  {}).get("last")),
+                "cycles":  (x.get("cycles", {}).get("last")),
+            })
+
+        return JsonResponse({"ok": True, "rows": rows})
+
+    except Exception as e:
+        return JsonResponse({"ok": False, "reason": str(e)}, status=500)
+
+
 @never_cache
 @require_GET
 def history_api(request: HttpRequest):
@@ -196,33 +250,42 @@ def history_api(request: HttpRequest):
 
         items: List[Dict[str, Any]] = []
 
-        # ---------- minutes ----------
+        # ---------- minutes (schema: ts_minute + nested stats) ----------
         try:
-            # แก้ path ให้ตรง: devices/{id}/minutes
             minutes_ref = fs.collection("devices").document(DEVICE_ID).collection("minutes")
+            # ใช้ ts_minute (ISO string) สำหรับกรอง/เรียงเวลา
+            iso_since = since.astimezone(timezone.utc).isoformat()
             if FieldFilter:
                 q = (
                     minutes_ref
-                    .where(filter=FieldFilter("createdAt", ">=", since))
-                    .order_by("createdAt", direction=_ORDER_ASC)
+                    .where(filter=FieldFilter("ts_minute", ">=", iso_since))
+                    .order_by("ts_minute", direction=_ORDER_ASC)
                 )
             else:
                 q = (
                     minutes_ref
-                    .where("createdAt", ">=", since)
-                    .order_by("createdAt", direction=_ORDER_ASC)
+                    .where("ts_minute", ">=", iso_since)
+                    .order_by("ts_minute", direction=_ORDER_ASC)
                 )
             rows = [d.to_dict() for d in q.stream()]
             for r in rows:
-                ts = _to_iso(r.get("createdAt"))
-                agg_key = {
-                    "temp": ("avg", "min", "max"),
-                    "current": ("avg_current", "min_current", "max_current"),
-                    "level": ("avg_level", "min_level", "max_level"),
-                    "cycles": ("avg_cycles", "min_cycles", "max_cycles"),
-                }.get(metric, ("avg", "min", "max"))
-                avg, mn, mx = r.get(agg_key[0]), r.get(agg_key[1]), r.get(agg_key[2])
-                if avg is not None and ts:
+                ts = r.get("ts_minute")
+                if not ts:
+                    continue
+                if metric == "temp":
+                    s = (r.get("temp") or {})
+                    avg, mn, mx = s.get("avg"), s.get("min"), s.get("max")
+                elif metric == "current":
+                    s = (r.get("current") or {})
+                    avg, mn, mx = s.get("avg"), s.get("min"), s.get("max")
+                elif metric == "level":
+                    s = (r.get("level") or {})
+                    avg, mn, mx = s.get("avg"), s.get("min"), s.get("max")
+                else:  # cycles
+                    s = (r.get("cycles") or {})
+                    val = s.get("sum")
+                    avg = val; mn = val; mx = val
+                if avg is not None:
                     items.append({"timestamp": ts, "min": mn, "avg": avg, "max": mx, "value": avg})
         except Exception:
             pass
@@ -264,6 +327,7 @@ def history_api(request: HttpRequest):
             except Exception:
                 pass
 
+        
         return JsonResponse({"items": items, "count": len(items)})
     except Exception as e:
         return JsonResponse({"items": [], "count": 0, "error": str(e)}, status=500)

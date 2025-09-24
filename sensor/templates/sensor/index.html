@@ -5,49 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>IoT Sensor Dashboard — {{ device_id }}</title>
 
-  <!-- Chart.js -->
+  <!-- Chart.js + time adapter -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 
   <style>
     :root{
       --bg:#f6f7f8; --card:#ffffff; --muted:#6b7280; --line:#e5e7eb; --ink:#111827;
-      /* palette (สวยและอ่านง่าย) */
-      --temp:#f97316;   /* orange  */
-      --amps:#0ea5e9;   /* sky     */
-      --cycles:#8b5cf6; /* violet  */
-      --level:#22c55e;  /* green   */
-      --tick:#94a3b8; --grid:#e5e7eb;
+      --temp:#f97316; --amps:#0ea5e9; --cycles:#8b5cf6; --level:#22c55e;
+      --tick:#94a3b8; --grid:#eef2ff;
     }
     *{box-sizing:border-box}
     html{color-scheme:light}
     body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
     .wrap{max-width:1280px;margin:18px auto;padding:0 16px}
 
-    /* Top bar */
+    /* Topbar */
     .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-    h1{margin:0 8px 0 0;font-size:22px}
+    h1{margin:0 8px 0 0;font-size:22px;letter-spacing:.2px}
     .sub{font-size:12px;color:var(--muted)}
     .right{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
     .btn{border:1px solid var(--line);background:#fff;padding:6px 10px;border-radius:10px;cursor:pointer;font-size:12px}
     .btn.active{background:#111;color:#fff;border-color:#111}
     .badge{padding:2px 8px;border-radius:999px;font-size:11px;background:#eef2ff;color:#4338ca}
 
-    /* KPI cards */
+    /* Cards */
     .grid{display:grid;gap:12px}
     .cards{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px}
     @media(max-width:1024px){.cards{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:640px){.cards{grid-template-columns:1fr}}
-    .card{background:var(--card);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.06);padding:12px}
+    .card{background:var(--card);border-radius:14px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:14px}
     .k-label{font-size:12px;color:var(--muted)}
-    .k-value{font-size:28px;font-weight:800;margin-top:4px}
+    .k-value{font-size:28px;font-weight:800;margin-top:4px;letter-spacing:.3px}
     .k-sub{font-size:11px;color:var(--muted);margin-top:4px}
     .chip{font-size:11px;padding:2px 8px;border-radius:999px;background:#e5f6ed;color:#16a34a;font-weight:700}
 
-    /* Chart panels */
-    .panel{background:var(--card);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.06);padding:10px}
+    /* Panels */
+    .panel{background:var(--card);border-radius:14px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:12px}
     .two{grid-template-columns:1fr 1fr}
     .panel h3{margin:0 0 6px 2px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
-    .chart-wrap{height:210px}
+    .chart-wrap{height:230px}
     canvas{width:100%;height:100%;background:#fff;border-radius:10px}
 
     /* Footer */
@@ -61,23 +58,19 @@
       <h1>IoT Sensor Dashboard</h1>
       <div class="sub">Device: <b>{{ device_id }}</b> • Real-time monitoring</div>
       <div class="badge" id="now-str">—</div>
+      <div class="badge" id="source-badge">source: —</div>
 
       <div class="right">
         <button class="btn range active" data-hours="1">1h</button>
         <button class="btn range" data-hours="4">4h</button>
         <button class="btn range" data-hours="24">24h</button>
-
         <button id="btn-refresh" class="btn" title="Refresh">⟳</button>
         <button id="btn-auto" class="btn" title="Toggle auto refresh">Auto: ON</button>
         <button id="btn-csv" class="btn" title="Download CSV">⬇ CSV</button>
-
-        <span class="sub">Firebase: <b id="fb-active">—</b></span>
-        <button id="fb-to-primary"  class="btn">Primary</button>
-        <button id="fb-to-secondary" class="btn">Secondary</button>
       </div>
     </div>
 
-    <!-- KPI CARDS -->
+    <!-- KPI cards -->
     <div class="grid cards">
       <div class="card">
         <div class="k-label">Temperature</div>
@@ -101,7 +94,7 @@
       </div>
     </div>
 
-    <!-- CHARTS -->
+    <!-- Charts -->
     <div class="grid two" style="margin-top:12px">
       <div class="panel">
         <h3>🌡️ Temperature Trend</h3>
@@ -131,16 +124,16 @@
   </div>
 
 <script>
-/* ========== Utils & theme ========== */
-const $ = (q)=>document.querySelector(q);
+/* ===== clock badge ===== */
 const nowLbl = ()=>{
   const d = new Date();
-  $('#now-str').textContent = d.toLocaleString(undefined,{hour12:false}) +
-    ' (' + Intl.DateTimeFormat().resolvedOptions().timeZone + ')';
+  document.querySelector('#now-str').textContent =
+    d.toLocaleString(undefined,{hour12:false}) + ' (' +
+    Intl.DateTimeFormat().resolvedOptions().timeZone + ')';
 };
 setInterval(nowLbl, 1000); nowLbl();
 
-const fmtTS = (s)=> s ? new Date(s).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
+/* ===== theme ===== */
 const css = getComputedStyle(document.documentElement);
 const PAL = {
   temp:   css.getPropertyValue('--temp').trim()   || '#f97316',
@@ -148,223 +141,213 @@ const PAL = {
   cycles: css.getPropertyValue('--cycles').trim() || '#8b5cf6',
   level:  css.getPropertyValue('--level').trim()  || '#22c55e',
   tick:   css.getPropertyValue('--tick').trim()   || '#94a3b8',
-  grid:   css.getPropertyValue('--grid').trim()   || '#e5e7eb',
+  grid:   css.getPropertyValue('--grid').trim()   || '#eef2ff',
 };
-
-function addAlpha(hexOrRgb, a){
-  if(hexOrRgb.startsWith('#')){
-    const c = hexOrRgb.length===4
-      ? hexOrRgb.slice(1).split('').map(h=>h+h).join('')
-      : hexOrRgb.slice(1);
+function addAlpha(color, a){
+  if(color.startsWith('#')){
+    const c = color.length===4 ? color.slice(1).split('').map(h=>h+h).join('') : color.slice(1);
     const r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16);
     return `rgba(${r},${g},${b},${a})`;
   }
-  if(hexOrRgb.startsWith('rgb')){
-    const m = hexOrRgb.match(/rgba?\(([^)]+)\)/);
-    if(!m) return hexOrRgb;
-    const [r,g,b] = m[1].split(',').slice(0,3).map(x=>+x.trim());
-    return `rgba(${r},${g},${b},${a})`;
-  }
-  return hexOrRgb;
+  const m = color.match(/rgba?\(([^)]+)\)/);
+  if(m){ const [r,g,b] = m[1].split(',').slice(0,3).map(x=>+x.trim()); return `rgba(${r},${g},${b},${a})`; }
+  return color;
 }
 
-function areaConfig(label, lineColor){
-  return {
-    type:'line',
-    data:{labels:[], datasets:[{
-      label, data:[], borderColor:lineColor, borderWidth:2, fill:true,
-      backgroundColor:(ctx)=>{
-        const chart = ctx.chart; const area = chart.chartArea;
-        if(!area) return addAlpha(lineColor, .0);
-        const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-        g.addColorStop(0, addAlpha(lineColor, .22));
-        g.addColorStop(1, addAlpha(lineColor, 0));
+/* ===== smart y scale (nice padding) ===== */
+function niceRange(arr){
+  const v = arr.filter(x=>Number.isFinite(x));
+  if(!v.length) return {};
+  const min = Math.min(...v), max = Math.max(...v);
+  if(min===max) return { suggestedMin: min-1, suggestedMax: max+1 };
+  const pad = (max-min)*0.08;
+  return { suggestedMin: min-pad, suggestedMax: max+pad };
+}
+
+/* ===== Chart factory (area) ===== */
+function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
+  const ctx = document.querySelector(canvasSel).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{
+      label, data: [], borderColor: color, borderWidth: 2,
+      tension: .3, pointRadius: 0, pointHitRadius: 8, spanGaps:true,
+      fill: fill,
+      stepped: stepped,
+      backgroundColor: (ctx)=>{
+        if(!fill) return 'transparent';
+        const area = ctx.chart.chartArea; if(!area) return addAlpha(color,0);
+        const g = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+        g.addColorStop(0, addAlpha(color, .22)); g.addColorStop(1, addAlpha(color, 0));
         return g;
       },
-      tension:.25, pointRadius:0, pointHitRadius:8, spanGaps:true,
     }]},
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      animation:{duration:600, easing:'easeOutQuart'},
-      interaction:{mode:'index', intersect:false},
-      parsing:false,
+    options: {
+      responsive:true, maintainAspectRatio:false, normalized:true,
+      animation:{ duration:400, easing:'easeOutQuad' },
+      interaction:{ mode:'index', intersect:false },
+      scales:{
+        x:{ type:'time', time:{ unit:'minute' }, ticks:{ color:PAL.tick }, grid:{ display:false }},
+        y:{ ticks:{ color:PAL.tick }, grid:{ color:PAL.grid } }
+      },
       plugins:{
-        legend:{display:false},
+        legend:{ display:false },
         tooltip:{
           displayColors:false,
           callbacks:{ label:(it)=> `${label}: ${Number(it.parsed.y).toFixed(2)}` }
         },
-        decimation:{ enabled:true, algorithm:'lttb', samples:60 },
-      },
-      scales:{
-        x:{ grid:{display:false}, ticks:{color:PAL.tick, maxRotation:0, autoSkip:true, maxTicksLimit:8} },
-        y:{ grid:{color:PAL.grid},   ticks:{color:PAL.tick, maxTicksLimit:4} }
+        /* ลด noise อัตโนมัติ */
+        decimation:{ enabled:true, algorithm:'lttb', samples: 200 }
       }
     }
-  };
+  });
 }
 
-/* ========== Build charts ========== */
+/* ===== build charts (cycles = step/no-fill) ===== */
 const charts = {
-  temp:    new Chart($('#c-temp'),    areaConfig('Temp (°C)', PAL.temp)),
-  current: new Chart($('#c-current'), areaConfig('Current (A)', PAL.amps)),
-  cycles:  new Chart($('#c-cycles'),  areaConfig('Cycles (cpm)', PAL.cycles)),
-  level:   new Chart($('#c-level'),   areaConfig('Level (cm)', PAL.level)),
+  temp:    makeAreaChart('#c-temp',    'Temp (°C)',   PAL.temp),
+  current: makeAreaChart('#c-current', 'Current (A)', PAL.amps),
+  cycles:  makeAreaChart('#c-cycles',  'Cycles',      PAL.cycles, {fill:false, stepped:'middle'}),
+  level:   makeAreaChart('#c-level',   'Level (cm)',  PAL.level),
 };
 
-let autoOn=true, lastHours=1, lastHistoryCache={};
+/* ===== helpers ===== */
+const fmt2 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+function setNum(sel, v, d=2){
+  const el = document.querySelector(sel);
+  if(!el) return;
+  if(v == null || Number.isNaN(v)) { el.textContent = '—'; return; }
+  el.textContent = d === 0 ? fmt0.format(v) : fmt2.format(v);
+}
+function setBadge(src){ const el = document.querySelector('#source-badge'); if(el) el.textContent = `source: ${src}`; }
 
-/* ========== Fetch helper ========== */
-async function jget(url){
-  const r = await fetch(url + (url.includes('?')?'&':'?') + 'bust=' + Date.now());
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const ct = r.headers.get('Content-Type')||'';
-  if(!ct.includes('application/json')) throw new Error('Bad content-type');
-  return r.json();
+/* ===== API ===== */
+const PI_LOCAL_URL = '/api/latest';
+const REFRESH_MS = 3000;
+
+async function fetchWithTimeout(url, ms){
+  return Promise.race([
+    fetch(url, {cache:'no-store'}),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
+  ]);
 }
 
-/* ========== Latest (KPI) ========== */
-async function loadLatest(){
+async function getLatestSmart(){
   try{
-    const j = await jget('/api/latest/');
-    const tv = Number(j.temp?.value);
-    $('#k-tempc').textContent = Number.isFinite(tv)? tv.toFixed(2) : '—';
-    $('#k-tempf').textContent = j.temp?.temp_f ?? '—';
-
-    const tb = $('#k-temp-badge');
-    if(Number.isFinite(tv)){
-      if(tv < 5){ tb.textContent='Low'; tb.style.display='inline-block'; tb.style.background='#e0f2fe'; tb.style.color='#0369a1'; }
-      else if(tv > 45){ tb.textContent='High'; tb.style.display='inline-block'; tb.style.background='#fee2e2'; tb.style.color='#b91c1c'; }
-      else { tb.textContent='Normal'; tb.style.display='inline-block'; tb.style.background='#e5f6ed'; tb.style.color='#16a34a'; }
+    const r = await fetchWithTimeout(PI_LOCAL_URL, 800);
+    if(r.ok){
+      const j = await r.json();
+      if(j && j.ok) return {...j, from:'local'};
     }
-
-    const av = Number(j.current?.value);
-    $('#k-amps').textContent = Number.isFinite(av)? av.toFixed(2) : '—';
-    const ab = $('#k-amps-status');
-    if(Number.isFinite(av)){
-      const hi = av>10;
-      ab.textContent = hi ? 'High' : 'Normal';
-      ab.style.display='inline-block';
-      ab.style.background = hi ? '#fee2e2' : '#e5f6ed';
-      ab.style.color      = hi ? '#b91c1c' : '#16a34a';
-    }
-
-    $('#k-level').textContent = j.level?.value ?? '—';
-    $('#k-level-pct').textContent = j.level?.percent ?? '—';
-    const lb = $('#k-level-status');
-    if(j.level?.percent != null){
-      const p = Number(j.level.percent);
-      lb.textContent = (p<20?'Low': p>90?'High':'Normal');
-      lb.style.display='inline-block';
-      lb.style.background = (p<20||p>90)?'#fff7ed':'#e5f6ed';
-      lb.style.color      = (p<20||p>90)?'#b45309':'#16a34a';
-    }
-
-    $('#k-cycles').textContent = Number(j.cycles?.value ?? NaN) || '—';
-    $('#k-cycles-status').textContent = 'Active';
-    $('#k-cycles-status').style.display='inline-block';
-
-    const ts = j.temp?.timestamp || j.current?.timestamp || j.level?.timestamp;
-    $('#last-upd').textContent = ts ? new Date(ts).toLocaleString() : '—';
-  }catch(e){ /* แกล้งเงียบเพื่อประหยัด read */ }
-}
-
-/* ========== History (กราฟ) ========== */
-async function loadHistory(hours){
-  lastHours = hours;
-  const metrics = ['temp','current','level','cycles'];
-  let total = 0;
-  for(const m of metrics){
-    try{
-      const j = await jget(`/api/history/?metric=${m}&hours=${hours}`);
-      lastHistoryCache[m] = j.items || [];
-      total += j.count || (j.items?.length||0);
-
-      const labels = (j.items||[]).map(x=>fmtTS(x.timestamp));
-      const values = (j.items||[]).map(x=>Number(x.value));
-
-      charts[m].data.labels = labels;
-      charts[m].data.datasets[0].data = values;
-      charts[m].update();
-    }catch(e){
-      charts[m].data.labels = [];
-      charts[m].data.datasets[0].data = [];
-      charts[m].update();
-    }
+    throw new Error();
+  }catch{
+    return { ts_ms: Date.now(), temp:null, current:null, level:null, cycles:null, from:'offline' };
   }
-  $('#rec-count').textContent = total;
 }
 
-/* ========== CSV ========== */
+/* ===== minutes loader (polished) ===== */
+async function loadMinutesHours(hours=1){
+  const r = await fetch(`/api/minutes?hours=${hours}`, {cache:'no-store'});
+  const j = await r.json();
+  if(!j.ok){ console.error(j); return; }
+  let rows = j.rows || [];
+
+  // ไม่มีแถว → ขยายช่วงอัตโนมัติ
+  if(rows.length===0 && hours<24){
+    return loadMinutesHours(hours<4?4:24);
+  }
+
+  // สร้าง labels/series
+  const labels  = rows.map(r => new Date(r.t_ms));
+  const vTemp    = rows.map(r => Number(r.temp));
+  const vCurrent = rows.map(r => Number(r.current));
+  const vLevel   = rows.map(r => Number(r.level));
+  const vCycles  = rows.map(r => Number(r.cycles));
+
+  // update datasets
+  charts.temp.data.labels    = labels; charts.temp.data.datasets[0].data    = vTemp;
+  charts.current.data.labels = labels; charts.current.data.datasets[0].data = vCurrent;
+  charts.level.data.labels   = labels; charts.level.data.datasets[0].data   = vLevel;
+  charts.cycles.data.labels  = labels; charts.cycles.data.datasets[0].data  = vCycles;
+
+  // smart y-range + decimation samples ตามช่วงเวลา
+  const samples = hours===1? 300 : hours===4? 400 : 600;
+  charts.temp.options.plugins.decimation.samples    = samples;
+  charts.current.options.plugins.decimation.samples = samples;
+  charts.level.options.plugins.decimation.samples   = samples;
+  charts.cycles.options.plugins.decimation.samples  = samples;
+
+  Object.assign(charts.temp.options.scales.y,    niceRange(vTemp));
+  Object.assign(charts.current.options.scales.y, niceRange(vCurrent));
+  Object.assign(charts.level.options.scales.y,   niceRange(vLevel));
+  Object.assign(charts.cycles.options.scales.y,  niceRange(vCycles));
+
+  charts.temp.update(); charts.current.update(); charts.level.update(); charts.cycles.update();
+
+  document.querySelector('#rec-count').textContent = String(rows.length);
+  window.__lastRows = rows;
+}
+
+/* ===== KPI (top cards) ===== */
+let autoOn=true, tKpi=0;
+async function refreshKPI(){
+  try{
+    const d = await getLatestSmart();
+    setNum("#k-tempc",  Number(d.temp),   2);
+    setNum("#k-amps",   Number(d.current),2);
+    setNum("#k-cycles", Number(d.cycles), 0);
+    setNum("#k-level",  Number(d.level),  2);
+    setBadge(d.from);
+    const ts = d.ts_ms ? new Date(d.ts_ms) : null;
+    document.querySelector('#last-upd').textContent = ts ? ts.toLocaleString() : '—';
+  }catch{}
+}
+function setupAuto(){
+  clearInterval(tKpi);
+  if(autoOn) tKpi = setInterval(refreshKPI, REFRESH_MS);
+}
+
+/* ===== CSV ===== */
 function downloadCSV(){
-  const rows = [['Timestamp','Temperature (°C)','Current (A)','Cycles (cpm)','Level (cm)'].join(',')];
-
-  // สมมุติว่าแต่ละ metric มี timestamp เดียวกัน (จาก minutes rollup)
-  // ถ้าไม่ตรง แก้ฝั่ง backend aggregate ให้ตรงคีย์เดียวกันจะสวยสุด
-  const map = new Map();
-  for(const it of (lastHistoryCache.temp||[]))       map.set(it.timestamp, {t:it.value});
-  for(const it of (lastHistoryCache.current||[])) { const r=map.get(it.timestamp)||{}; r.a=it.value; map.set(it.timestamp,r); }
-  for(const it of (lastHistoryCache.cycles||[]))  { const r=map.get(it.timestamp)||{}; r.c=it.value; map.set(it.timestamp,r); }
-  for(const it of (lastHistoryCache.level||[]))   { const r=map.get(it.timestamp)||{}; r.l=it.value; map.set(it.timestamp,r); }
-
-  [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([ts,v])=>{
-    rows.push([ts, v.t??'', v.a??'', v.c??'', v.l??''].join(','));
-  });
-
-  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const rows = window.__lastRows || [];
+  const head = ['timestamp','temp_c','current_a','cycles','level_cm'];
+  const lines = [head.join(',')];
+  for(const r of rows){
+    const ts = new Date(r.t_ms).toISOString();
+    lines.push([ts, r.temp??'', r.current??'', r.cycles??'', r.level??''].join(','));
+  }
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `history_{{ device_id }}_${lastHours}h.csv`.replace(/\s+/g,'');
+  a.download = `minutes_{{ device_id }}.csv`.replace(/\s+/g,'');
   a.click(); URL.revokeObjectURL(a.href);
 }
 
-/* ========== Firebase switcher ========== */
-async function refreshActive(){
-  try{
-    const j = await jget('/api/firebase/active/');
-    $('#fb-active').textContent = j.active || '—';
-    $('#fb-to-primary').disabled  = (j.active==='primary')  || j.available?.primary===false;
-    $('#fb-to-secondary').disabled= (j.active==='secondary')|| j.available?.secondary===false;
-  }catch{ $('#fb-active').textContent='—'; }
-}
-async function switchTo(target){
-  try{
-    $('#fb-to-primary').disabled = $('#fb-to-secondary').disabled = true;
-    const r = await fetch(`/api/firebase/active/set/?to=${encodeURIComponent(target)}`);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.error||'switch failed');
-  }catch(e){ alert('Switch error: '+e.message); }
-  finally{ await refreshActive(); await loadLatest(); }
-}
-
-/* ========== Auto refresh ========== */
-let tKpi=0;
-function setupAuto(){
-  clearInterval(tKpi);
-  if(!autoOn) return;
-  tKpi = setInterval(loadLatest, 30_000); // KPI 30s
-}
-
-/* ========== UI bindings ========== */
+/* ===== UI ===== */
 document.querySelectorAll('.btn.range').forEach(b=>{
-  b.onclick=()=>{
+  b.addEventListener('click', ()=>{
     document.querySelectorAll('.btn.range').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
-    loadHistory(Number(b.dataset.hours||'4'));
-  };
+    loadMinutesHours(parseInt(b.dataset.hours||'1',10));
+  });
 });
-$('#btn-refresh').onclick=()=>{ loadLatest(); loadHistory(lastHours); };
-$('#btn-auto').onclick=()=>{ autoOn=!autoOn; $('#btn-auto').textContent='Auto: '+(autoOn?'ON':'OFF'); setupAuto(); };
-$('#btn-csv').onclick=downloadCSV;
-$('#fb-to-primary').onclick = ()=>switchTo('primary');
-$('#fb-to-secondary').onclick = ()=>switchTo('secondary');
+document.querySelector('#btn-refresh').addEventListener('click', ()=>{
+  refreshKPI();
+  const act = document.querySelector('.btn.range.active');
+  loadMinutesHours(parseInt(act?.dataset.hours||'1',10));
+});
+document.querySelector('#btn-auto').addEventListener('click', ()=>{
+  autoOn = !autoOn;
+  document.querySelector('#btn-auto').textContent = 'Auto: ' + (autoOn?'ON':'OFF');
+  setupAuto();
+});
+document.querySelector('#btn-csv').addEventListener('click', downloadCSV);
 
-/* ========== Kickoff ========== */
+/* ===== Kickoff ===== */
 (async()=>{
-  await refreshActive();
-  await loadLatest();
-  await loadHistory(1);
+  await refreshKPI();
+  await loadMinutesHours(24);   // เริ่มที่ 24h เพื่อให้กราฟมาแน่
   setupAuto();
 })();
 </script>
