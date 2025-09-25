@@ -5,12 +5,19 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render
 from django.http import JsonResponse, HttpRequest
 from django.views.decorators.http import require_GET
 from django.views.decorators.cache import never_cache
 
 from .firebase_admin_init import get_fs, get_active
+
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]     # ~/projects/max6675
+TOKENS_JSON = BASE_DIR / "keys" / "expo_tokens.json"
+ALERTS_DB   = BASE_DIR / "alerts.sqlite"
 
 DEVICE_ID = os.getenv("DEVICE_ID", "pi5-001")
 FB_TOGGLE_PATH = os.getenv("FB_TOGGLE_PATH", "/var/lib/tempmon/firebase-active")
@@ -332,6 +339,46 @@ def history_api(request: HttpRequest):
     except Exception as e:
         return JsonResponse({"items": [], "count": 0, "error": str(e)}, status=500)
 
+
+@csrf_exempt
+def expo_token_api(request: HttpRequest):
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST only"}, status=405)
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        token = str(data.get("token") or "").strip()
+        if not token:
+            return JsonResponse({"ok": False, "error": "missing token"}, status=400)
+        TOKENS_JSON.parent.mkdir(parents=True, exist_ok=True)
+        arr = []
+        if TOKENS_JSON.exists():
+            try: arr = json.loads(TOKENS_JSON.read_text())
+            except: arr = []
+        if token not in arr:
+            arr.append(token)
+            TOKENS_JSON.write_text(json.dumps(arr, ensure_ascii=False, indent=2))
+        return JsonResponse({"ok": True, "count": len(arr)})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+
+# ---- Alerts list (read from alerts.sqlite) ----
+def alerts_list_api(request: HttpRequest):
+    limit = int(request.GET.get("limit", "100"))
+    rows = []
+    try:
+        conn = sqlite3.connect(str(ALERTS_DB))
+        cur = conn.execute("""SELECT id, type, message, severity, value, threshold, created_at
+                              FROM alerts ORDER BY id DESC LIMIT ?""", (limit,))
+        for r in cur.fetchall():
+            rows.append({
+                "id": r[0], "type": r[1], "message": r[2], "severity": r[3],
+                "value": r[4], "threshold": r[5], "createdAt": r[6],
+            })
+        conn.close()
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+    return JsonResponse({"ok": True, "items": rows})
 
 # -------- Firebase toggle --------
 @never_cache
