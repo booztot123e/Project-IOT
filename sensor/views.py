@@ -380,6 +380,49 @@ def alerts_list_api(request: HttpRequest):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
     return JsonResponse({"ok": True, "items": rows})
 
+
+# -------- alerts ใหม่ --------
+def alerts_recent(request):
+    try:
+        n = int(request.GET.get("limit", "50"))
+    except:
+        n = 50
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("""
+      SELECT ts_ms, metric, value, threshold, severity, state, message, device_id
+      FROM alert_events ORDER BY ts_ms DESC LIMIT ?
+    """, (n,))
+    rows = [{
+        "ts_ms": r[0], "metric": r[1], "value": r[2], "threshold": r[3],
+        "severity": r[4], "state": r[5], "message": r[6], "device_id": r[7]
+    } for r in cur.fetchall()]
+    con.close()
+    return JsonResponse({"ok": True, "rows": rows})
+
+
+@csrf_exempt
+def push_register(request):
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+        token = body.get("token")
+    except Exception:
+        token = None
+    if not token:
+        return JsonResponse({"ok": False, "error": "no token"}, status=400)
+    path = os.getenv("PUSH_TOKENS", "/var/lib/tempmon/push_tokens.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {"tokens": []}
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            try: data = json.load(f)
+            except: data = {"tokens": []}
+    if token not in data["tokens"]:
+        data["tokens"].append(token)
+    with open(path, "w") as f:
+        json.dump(data, f)
+    return JsonResponse({"ok": True})
+
 # -------- Firebase toggle --------
 @never_cache
 def firebase_active_get(request: HttpRequest):

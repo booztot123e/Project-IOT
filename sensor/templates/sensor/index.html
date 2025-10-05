@@ -50,6 +50,13 @@
     /* Footer */
     .footer{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px;margin-top:10px}
     .ok{color:#16a34a}
+
+    /* Alert flash */
+    .alert-flash{ animation:alertFlash 1.8s ease-in-out; }
+    @keyframes alertFlash{
+      0%,100%{ box-shadow:0 2px 6px rgba(0,0,0,.06); }
+      50%{ box-shadow:0 2px 14px rgba(220,38,38,.35); }
+    }
   </style>
 </head>
 <body>
@@ -114,6 +121,25 @@
       </div>
     </div>
 
+    <!-- Alerts Panel -->
+    <div id="alerts-panel" class="panel" style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <h3 style="margin:0;font-size:14px;color:#6b7280">⚠ Alerts</h3>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280">
+          <input id="alerts-mute" type="checkbox"/> Mute
+        </label>
+        <span id="alerts-count" style="font-size:12px;color:#6b7280">—</span>
+      </div>
+
+      <!-- Alert controls (Enable/Test sound) -->
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+        <button id="alerts-enable-sound" class="btn" style="padding:4px 8px">🔔 Enable sound</button>
+        <button id="alerts-test-beep" class="btn" style="padding:4px 8px">▶ Test beep</button>
+      </div>
+
+      <div id="alerts-list" style="margin-top:8px;font-size:13px;color:#374151">Loading…</div>
+    </div>
+
     <div class="footer">
       <span>• Live Data</span>
       <span>Last updated: <span id="last-upd">—</span></span>
@@ -154,56 +180,51 @@ function addAlpha(color, a){
   return color;
 }
 
-/* ===== smart y scale (nice padding) ===== */
+/* ===== smart y scale ===== */
 function niceRange(arr){
   const v = arr.filter(x=>Number.isFinite(x));
   if(!v.length) return {};
   const min = Math.min(...v), max = Math.max(...v);
-  if(min===max) return { suggestedMin: min-1, suggestedMax: max+1 };
+  if(min===max) return { suggestedMin:min-1, suggestedMax:max+1 };
   const pad = (max-min)*0.08;
-  return { suggestedMin: min-pad, suggestedMax: max+pad };
+  return { suggestedMin:min-pad, suggestedMax:max+pad };
 }
 
-/* ===== Chart factory (area) ===== */
+/* ===== Chart factory ===== */
 function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
   const ctx = document.querySelector(canvasSel).getContext('2d');
   return new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [{
-      label, data: [], borderColor: color, borderWidth: 2,
-      tension: .3, pointRadius: 0, pointHitRadius: 8, spanGaps:true,
-      fill: fill,
-      stepped: stepped,
-      backgroundColor: (ctx)=>{
+    type:'line',
+    data:{ labels:[], datasets:[{
+      label, data:[], borderColor:color, borderWidth:2,
+      tension:.3, pointRadius:0, pointHitRadius:8, spanGaps:true,
+      fill, stepped,
+      backgroundColor:(c)=>{
         if(!fill) return 'transparent';
-        const area = ctx.chart.chartArea; if(!area) return addAlpha(color,0);
-        const g = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-        g.addColorStop(0, addAlpha(color, .22)); g.addColorStop(1, addAlpha(color, 0));
+        const area = c.chart.chartArea; if(!area) return addAlpha(color,0);
+        const g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+        g.addColorStop(0, addAlpha(color,.22)); g.addColorStop(1, addAlpha(color,0));
         return g;
       },
     }]},
-    options: {
+    options:{
       responsive:true, maintainAspectRatio:false, normalized:true,
-      animation:{ duration:400, easing:'easeOutQuad' },
-      interaction:{ mode:'index', intersect:false },
+      animation:{duration:400, easing:'easeOutQuad'},
+      interaction:{mode:'index', intersect:false},
       scales:{
-        x:{ type:'time', time:{ unit:'minute' }, ticks:{ color:PAL.tick }, grid:{ display:false }},
-        y:{ ticks:{ color:PAL.tick }, grid:{ color:PAL.grid } }
+        x:{type:'time', time:{unit:'minute'}, ticks:{color:PAL.tick}, grid:{display:false}},
+        y:{ticks:{color:PAL.tick}, grid:{color:PAL.grid}}
       },
       plugins:{
-        legend:{ display:false },
-        tooltip:{
-          displayColors:false,
-          callbacks:{ label:(it)=> `${label}: ${Number(it.parsed.y).toFixed(2)}` }
-        },
-        /* ลด noise อัตโนมัติ */
-        decimation:{ enabled:true, algorithm:'lttb', samples: 200 }
+        legend:{display:false},
+        tooltip:{displayColors:false, callbacks:{label:(it)=>`${label}: ${Number(it.parsed.y).toFixed(2)}`}},
+        decimation:{enabled:true, algorithm:'lttb', samples:200}
       }
     }
   });
 }
 
-/* ===== build charts (cycles = step/no-fill) ===== */
+/* ===== build charts ===== */
 const charts = {
   temp:    makeAreaChart('#c-temp',    'Temp (°C)',   PAL.temp),
   current: makeAreaChart('#c-current', 'Current (A)', PAL.amps),
@@ -212,15 +233,15 @@ const charts = {
 };
 
 /* ===== helpers ===== */
-const fmt2 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
-const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const fmt2 = new Intl.NumberFormat('en-US',{maximumFractionDigits:2});
+const fmt0 = new Intl.NumberFormat('en-US',{maximumFractionDigits:0});
 function setNum(sel, v, d=2){
-  const el = document.querySelector(sel);
+  const el=document.querySelector(sel);
   if(!el) return;
-  if(v == null || Number.isNaN(v)) { el.textContent = '—'; return; }
-  el.textContent = d === 0 ? fmt0.format(v) : fmt2.format(v);
+  if(v==null || Number.isNaN(v)) { el.textContent='—'; return; }
+  el.textContent = d===0 ? fmt0.format(v) : fmt2.format(v);
 }
-function setBadge(src){ const el = document.querySelector('#source-badge'); if(el) el.textContent = `source: ${src}`; }
+function setBadge(src){ const el=document.querySelector('#source-badge'); if(el) el.textContent=`source: ${src}`; }
 
 /* ===== API ===== */
 const PI_LOCAL_URL = '/api/latest';
@@ -228,51 +249,40 @@ const REFRESH_MS = 3000;
 
 async function fetchWithTimeout(url, ms){
   return Promise.race([
-    fetch(url, {cache:'no-store'}),
+    fetch(url,{cache:'no-store'}),
     new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
   ]);
 }
-
 async function getLatestSmart(){
   try{
     const r = await fetchWithTimeout(PI_LOCAL_URL, 800);
-    if(r.ok){
-      const j = await r.json();
-      if(j && j.ok) return {...j, from:'local'};
-    }
+    if(r.ok){ const j=await r.json(); if(j && j.ok) return {...j, from:'local'}; }
     throw new Error();
   }catch{
-    return { ts_ms: Date.now(), temp:null, current:null, level:null, cycles:null, from:'offline' };
+    return { ts_ms:Date.now(), temp:null, current:null, level:null, cycles:null, from:'offline' };
   }
 }
 
-/* ===== minutes loader (polished) ===== */
+/* ===== minutes loader ===== */
 async function loadMinutesHours(hours=1){
-  const r = await fetch(`/api/minutes?hours=${hours}`, {cache:'no-store'});
+  const r = await fetch(`/api/minutes?hours=${hours}`,{cache:'no-store'});
   const j = await r.json();
   if(!j.ok){ console.error(j); return; }
   let rows = j.rows || [];
+  if(rows.length===0 && hours<24) return loadMinutesHours(hours<4?4:24);
 
-  // ไม่มีแถว → ขยายช่วงอัตโนมัติ
-  if(rows.length===0 && hours<24){
-    return loadMinutesHours(hours<4?4:24);
-  }
-
-  // สร้าง labels/series
   const labels  = rows.map(r => new Date(r.t_ms));
   const vTemp    = rows.map(r => Number(r.temp));
   const vCurrent = rows.map(r => Number(r.current));
   const vLevel   = rows.map(r => Number(r.level));
   const vCycles  = rows.map(r => Number(r.cycles));
 
-  // update datasets
   charts.temp.data.labels    = labels; charts.temp.data.datasets[0].data    = vTemp;
   charts.current.data.labels = labels; charts.current.data.datasets[0].data = vCurrent;
   charts.level.data.labels   = labels; charts.level.data.datasets[0].data   = vLevel;
   charts.cycles.data.labels  = labels; charts.cycles.data.datasets[0].data  = vCycles;
 
-  // smart y-range + decimation samples ตามช่วงเวลา
-  const samples = hours===1? 300 : hours===4? 400 : 600;
+  const samples = hours===1?300: hours===4?400:600;
   charts.temp.options.plugins.decimation.samples    = samples;
   charts.current.options.plugins.decimation.samples = samples;
   charts.level.options.plugins.decimation.samples   = samples;
@@ -284,7 +294,6 @@ async function loadMinutesHours(hours=1){
   Object.assign(charts.cycles.options.scales.y,  niceRange(vCycles));
 
   charts.temp.update(); charts.current.update(); charts.level.update(); charts.cycles.update();
-
   document.querySelector('#rec-count').textContent = String(rows.length);
   window.__lastRows = rows;
 }
@@ -303,10 +312,7 @@ async function refreshKPI(){
     document.querySelector('#last-upd').textContent = ts ? ts.toLocaleString() : '—';
   }catch{}
 }
-function setupAuto(){
-  clearInterval(tKpi);
-  if(autoOn) tKpi = setInterval(refreshKPI, REFRESH_MS);
-}
+function setupAuto(){ clearInterval(tKpi); if(autoOn) tKpi=setInterval(refreshKPI, REFRESH_MS); }
 
 /* ===== CSV ===== */
 function downloadCSV(){
@@ -317,10 +323,10 @@ function downloadCSV(){
     const ts = new Date(r.t_ms).toISOString();
     lines.push([ts, r.temp??'', r.current??'', r.cycles??'', r.level??''].join(','));
   }
-  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `minutes_{{ device_id }}.csv`.replace(/\s+/g,'');
+  const blob = new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`minutes_{{ device_id }}.csv`.replace(/\s+/g,'');
   a.click(); URL.revokeObjectURL(a.href);
 }
 
@@ -334,21 +340,169 @@ document.querySelectorAll('.btn.range').forEach(b=>{
 });
 document.querySelector('#btn-refresh').addEventListener('click', ()=>{
   refreshKPI();
-  const act = document.querySelector('.btn.range.active');
+  const act=document.querySelector('.btn.range.active');
   loadMinutesHours(parseInt(act?.dataset.hours||'1',10));
 });
 document.querySelector('#btn-auto').addEventListener('click', ()=>{
-  autoOn = !autoOn;
-  document.querySelector('#btn-auto').textContent = 'Auto: ' + (autoOn?'ON':'OFF');
+  autoOn=!autoOn;
+  document.querySelector('#btn-auto').textContent='Auto: '+(autoOn?'ON':'OFF');
   setupAuto();
 });
 document.querySelector('#btn-csv').addEventListener('click', downloadCSV);
 
+/* ===================================================================== */
+/* =======================  Alerts (Mute + Sound)  ===================== */
+/* ===================================================================== */
+let ALERTS_LAST_TS = Number(localStorage.getItem('alerts.lastTs') || '0');
+let ALERTS_MUTE    = localStorage.getItem('alerts.mute') === '1';
+const $mute  = document.getElementById('alerts-mute');
+const $list  = document.getElementById('alerts-list');
+const $count = document.getElementById('alerts-count');
+const $panel = document.getElementById('alerts-panel');
+if($mute) $mute.checked = ALERTS_MUTE;
+
+/* Blink title when new alert */
+let BLINK_INT=0, ORIG_TITLE=document.title;
+function blinkStart(){ if(BLINK_INT) return; let on=false; BLINK_INT=setInterval(()=>{ document.title = on?'⚠ ALERT!':ORIG_TITLE; on=!on; }, 700); }
+function blinkStop(){ if(BLINK_INT){ clearInterval(BLINK_INT); BLINK_INT=0; document.title=ORIG_TITLE; } }
+
+/* Render list */
+function renderAlertRows(rows){
+  if(!rows.length){ $list.textContent='No alerts'; blinkStop(); return; }
+  $list.innerHTML = rows.map(x=>{
+    const t = new Date(x.ts_ms).toLocaleString();
+    const open = x.state==='open';
+    const color=open?'#b91c1c':'#16a34a';
+    const bkg  =open?'#fee2e2':'#e5f6ed';
+    const sev  =(x.severity||'').toUpperCase();
+    return `
+      <div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:6px 0">
+        <span style="font-size:10px;background:${bkg};color:${color};padding:2px 6px;border-radius:999px">${x.state}</span>
+        <b>${x.metric}</b>
+        <span>value=${Number(x.value).toFixed(2)}</span>
+        <span>th=${x.threshold}</span>
+        <span style="color:#6b7280">(${sev||'—'})</span>
+        <span style="margin-left:auto;color:#6b7280">${t}</span>
+      </div>`;
+  }).join('');
+}
+
+/* ====== Sound unlock & 10s Alarm (WebAudio, louder) ====== */
+let AUDIO_CTX = null; let MASTER_GAIN = null;
+let AUDIO_ENABLED = localStorage.getItem('alerts.audioEnabled') === '1';
+const btnEnable = document.getElementById('alerts-enable-sound');
+const btnTest   = document.getElementById('alerts-test-beep');
+let ALARM_TIMER = null; let ALARM_END_AT = 0;
+
+async function ensureAudioUnlocked() {
+  try {
+    if (!AUDIO_CTX) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      AUDIO_CTX = new AC();
+      MASTER_GAIN = AUDIO_CTX.createGain();
+      MASTER_GAIN.gain.value = 0.0;
+      MASTER_GAIN.connect(AUDIO_CTX.destination);
+    }
+    if (AUDIO_CTX.state === 'suspended') await AUDIO_CTX.resume();
+    AUDIO_ENABLED = true;
+    localStorage.setItem('alerts.audioEnabled', '1');
+    if (btnEnable) { btnEnable.textContent = '🔔 Sound ON'; btnEnable.classList.add('active'); }
+    return true;
+  } catch { return false; }
+}
+function tone(freq = 1100, ms = 180) {
+  if (!AUDIO_CTX || !MASTER_GAIN) return;
+  const ctx = AUDIO_CTX;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'square';
+  o.frequency.value = freq;
+  g.gain.value = 0.22;
+  o.connect(g).connect(MASTER_GAIN);
+  const now = ctx.currentTime;
+  o.start(now);
+  g.gain.setValueAtTime(g.gain.value, now);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + ms / 1000);
+  o.stop(now + ms / 1000 + 0.02);
+}
+function startAlarm(ms = 10000) {
+  if (ALERTS_MUTE || !AUDIO_ENABLED || !AUDIO_CTX) return;
+  stopAlarm(false);
+  MASTER_GAIN.gain.setTargetAtTime(1.0, AUDIO_CTX.currentTime, 0.01);
+  const pattern = () => { tone(1250,190); setTimeout(()=>tone(900,190), 200); };
+  pattern();
+  ALARM_END_AT = Date.now() + ms;
+  ALARM_TIMER = setInterval(() => {
+    if (Date.now() >= ALARM_END_AT || ALERTS_MUTE || !AUDIO_ENABLED) { stopAlarm(); return; }
+    pattern();
+  }, 450);
+}
+function stopAlarm(reset = true) {
+  if (ALARM_TIMER) { clearInterval(ALARM_TIMER); ALARM_TIMER = null; }
+  if (AUDIO_CTX && MASTER_GAIN) MASTER_GAIN.gain.setTargetAtTime(0.0, AUDIO_CTX.currentTime, 0.05);
+  if (reset) ALARM_END_AT = 0;
+}
+btnEnable?.addEventListener('click', async () => {
+  const ok = await ensureAudioUnlocked();
+  if (!ok) alert('เบราว์เซอร์ยังไม่อนุญาตเสียง ลองแตะหน้าจอ/ปิดโหมดเงียบ แล้วกดอีกครั้ง');
+});
+btnTest?.addEventListener('click', async () => {
+  if (!AUDIO_ENABLED) await ensureAudioUnlocked();
+  startAlarm(1500);
+});
+const oneTimeUnlock = async () => { if (!AUDIO_ENABLED) await ensureAudioUnlocked(); document.removeEventListener('pointerdown', oneTimeUnlock, {capture:true}); };
+document.addEventListener('pointerdown', oneTimeUnlock, {capture:true});
+if (AUDIO_ENABLED && btnEnable) { btnEnable.textContent = '🔔 Sound ON'; btnEnable.classList.add('active'); }
+
+/* Poll alerts */
+async function fetchAlerts(){
+  try{
+    const r = await fetch('/api/alerts/recent/?limit=20',{cache:'no-store'});
+    if(!r.ok) throw new Error(r.status);
+    const j = await r.json(); if(!j.ok) throw 0;
+    const rows = j.rows || [];
+    const openCount = rows.filter(x=>x.state==='open').length;
+    $count.textContent = `${openCount} open / ${rows.length} recent`;
+    renderAlertRows(rows);
+
+    const newest = rows.reduce((m,x)=>Math.max(m, Number(x.ts_ms)||0), 0);
+    if(newest > ALERTS_LAST_TS){
+      ALERTS_LAST_TS = newest;
+      localStorage.setItem('alerts.lastTs', String(ALERTS_LAST_TS));
+      /* เปลี่ยนเป็นเสียงยาว ~10s */
+      startAlarm(10000);
+      blinkStart();
+      if($panel){ $panel.classList.add('alert-flash'); setTimeout(()=>$panel.classList.remove('alert-flash'), 1800); }
+    }
+    if(openCount===0) { blinkStop(); stopAlarm(); }
+
+    // footer badge
+    const ds = document.getElementById('dev-status');
+    if(ds){
+      if(openCount>0){ ds.textContent=`ALERT ×${openCount}`; ds.classList.remove('ok'); ds.style.color='#b91c1c'; }
+      else           { ds.textContent='Online';            ds.classList.add('ok');     ds.style.color=''; }
+    }
+  }catch(e){ /* silent */ }
+}
+
+/* events */
+if($mute){
+  $mute.addEventListener('change', ()=>{
+    ALERTS_MUTE = $mute.checked;
+    localStorage.setItem('alerts.mute', ALERTS_MUTE ? '1':'0');
+    if(ALERTS_MUTE) { blinkStop(); stopAlarm(); }
+  });
+}
+
 /* ===== Kickoff ===== */
 (async()=>{
   await refreshKPI();
-  await loadMinutesHours(24);   // เริ่มที่ 24h เพื่อให้กราฟมาแน่
+  await loadMinutesHours(24);
   setupAuto();
+
+  await fetchAlerts();
+  setInterval(fetchAlerts, 10000); // every 10s
 })();
 </script>
 </body>
