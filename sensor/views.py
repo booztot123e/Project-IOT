@@ -381,7 +381,7 @@ def alerts_list_api(request: HttpRequest):
     return JsonResponse({"ok": True, "items": rows})
 
 
-# -------- alerts ใหม่ --------
+# -------- alerts ใหม่ (SQLite) --------
 def alerts_recent(request):
     try:
         n = int(request.GET.get("limit", "50"))
@@ -400,6 +400,73 @@ def alerts_recent(request):
     con.close()
     return JsonResponse({"ok": True, "rows": rows})
 
+
+# -------- NEW: alerts ล่าสุดจาก Firestore สำหรับ Mobile app --------
+@never_cache
+@require_GET
+def alerts_latest(request: HttpRequest):
+    """
+    ดึง alert ล่าสุด N รายการจากคอลเลกชัน Firestore 'alerts'
+    เรียกใช้จากมือถือ: /api/alerts/latest?limit=20
+    """
+    try:
+        fs = get_fs()
+        if fs is None:
+            return JsonResponse({"ok": False, "error": "Firestore not ready"}, status=500)
+
+        try:
+            limit = max(1, min(int(request.GET.get("limit", "20")), 100))
+        except Exception:
+            limit = 20
+
+        q = (
+            fs.collection("alerts")
+              .order_by("ts_ms", direction=_ORDER_DESC)
+              .limit(limit)
+        )
+        docs = list(q.stream())
+        rows = []
+        for d in docs:
+            obj = d.to_dict() or {}
+            # แปลง timestamp ให้เป็น ISO ถ้ามี
+            if "ts_ms" in obj and isinstance(obj["ts_ms"], (int, float)):
+                obj["ts_iso"] = datetime.fromtimestamp(obj["ts_ms"]/1000.0, tz=timezone.utc).isoformat()
+            rows.append(obj)
+
+        return JsonResponse({"ok": True, "rows": rows})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+def status_summary(request):
+    """
+    สรุปค่าปัจจุบันของทุก sensor (temp/current/level/cycles)
+    ใช้โดยแอปมือถือ
+    """
+    try:
+        fs = get_fs()
+        if fs is None:
+            return JsonResponse({"ok": False, "error": "Firestore not ready"}, status=500)
+
+        device_id = os.getenv("DEVICE_ID", "pi5-001")
+
+        # โครงสร้างหลักเก็บไว้ที่ document ของ device
+        doc = fs.collection("devices").document(device_id).get()
+        data = doc.to_dict() or {}
+
+        # เผื่อโปรเจกต์เก็บค่า recent ไว้ที่ series/latest
+        if not data.get("latest"):
+            try:
+                latest = (
+                    fs.collection("devices").document(device_id)
+                      .collection("series").document("latest").get()
+                )
+                data["latest"] = latest.to_dict() or {}
+            except Exception:
+                pass
+
+        return JsonResponse({"ok": True, "data": data})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 @csrf_exempt
 def push_register(request):
@@ -422,6 +489,7 @@ def push_register(request):
     with open(path, "w") as f:
         json.dump(data, f)
     return JsonResponse({"ok": True})
+
 
 # -------- Firebase toggle --------
 @never_cache

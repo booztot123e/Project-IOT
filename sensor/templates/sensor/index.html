@@ -68,9 +68,10 @@
       <div class="badge" id="source-badge">source: —</div>
 
       <div class="right">
-        <button class="btn range active" data-hours="1">1h</button>
-        <button class="btn range" data-hours="4">4h</button>
-        <button class="btn range" data-hours="24">24h</button>
+        <!-- ปุ่มช่วงเวลาใหม่ -->
+        <button class="btn range active" data-hours="24">1d</button>
+        <button class="btn range" data-hours="72">3d</button>
+        <button class="btn range" data-hours="168">7d</button>
         <button id="btn-refresh" class="btn" title="Refresh">⟳</button>
         <button id="btn-auto" class="btn" title="Toggle auto refresh">Auto: ON</button>
         <button id="btn-csv" class="btn" title="Download CSV">⬇ CSV</button>
@@ -181,10 +182,10 @@ function addAlpha(color, a){
 }
 
 /* ===== smart y scale ===== */
-function niceRange(arr){
-  const v = arr.filter(x=>Number.isFinite(x));
-  if(!v.length) return {};
-  const min = Math.min(...v), max = Math.max(...v);
+function niceRangeFromSeries(series){
+  const vals = series.map(p => p?.y).filter(v => Number.isFinite(v));
+  if(!vals.length) return {};
+  const min = Math.min(...vals), max = Math.max(...vals);
   if(min===max) return { suggestedMin:min-1, suggestedMax:max+1 };
   const pad = (max-min)*0.08;
   return { suggestedMin:min-pad, suggestedMax:max+pad };
@@ -197,8 +198,8 @@ function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
     type:'line',
     data:{ labels:[], datasets:[{
       label, data:[], borderColor:color, borderWidth:2,
-      tension:.3, pointRadius:0, pointHitRadius:8, spanGaps:true,
-      fill, stepped,
+      tension:.28, pointRadius:0, pointHitRadius:8,
+      spanGaps:false, fill, stepped,
       backgroundColor:(c)=>{
         if(!fill) return 'transparent';
         const area = c.chart.chartArea; if(!area) return addAlpha(color,0);
@@ -208,17 +209,18 @@ function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
       },
     }]},
     options:{
+      parsing:false, /* เราจะป้อน {x,y} เอง */
       responsive:true, maintainAspectRatio:false, normalized:true,
       animation:{duration:400, easing:'easeOutQuad'},
       interaction:{mode:'index', intersect:false},
       scales:{
-        x:{type:'time', time:{unit:'minute'}, ticks:{color:PAL.tick}, grid:{display:false}},
+        x:{type:'time', time:{unit:'day'}, ticks:{color:PAL.tick}, grid:{display:false}},
         y:{ticks:{color:PAL.tick}, grid:{color:PAL.grid}}
       },
       plugins:{
         legend:{display:false},
         tooltip:{displayColors:false, callbacks:{label:(it)=>`${label}: ${Number(it.parsed.y).toFixed(2)}`}},
-        decimation:{enabled:true, algorithm:'lttb', samples:200}
+        decimation:{enabled:true, algorithm:'lttb', samples:300}
       }
     }
   });
@@ -263,35 +265,86 @@ async function getLatestSmart(){
   }
 }
 
-/* ===== minutes loader ===== */
-async function loadMinutesHours(hours=1){
-  const r = await fetch(`/api/minutes?hours=${hours}`,{cache:'no-store'});
+/* ===== เลือก unit เวลา & samples ===== */
+function chooseTimeUnit(hours){
+  if(hours <= 6) return 'minute';
+  if(hours <= 48) return 'hour';
+  return 'day';
+}
+function chooseSamples(hours){
+  if(hours <= 6)  return 300;
+  if(hours <= 48) return 500;
+  return 800;
+}
+
+/* ใส่ null คั่นรูโหว่ เพื่อไม่ให้เชื่อมเส้น */
+function buildSeries(rows, key, hours){
+  const gapMs = hours <= 24 ? 15*60*1000 : 60*60*1000; // >15 นาที (1d) / >1ชม. (3–7d) = gap
+  const out = [];
+  let prev = null;
+  for(const r of rows){
+    const t = Number(r.t_ms);
+    const v = r[key] != null ? Number(r[key]) : null;
+    if(prev && t - prev > gapMs){
+      out.push({x:new Date(prev + 1), y:null}); // คั่นให้ Chart.js ตัดเส้น
+    }
+    out.push({x:new Date(t), y: Number.isFinite(v) ? v : null});
+    prev = t;
+  }
+  return out;
+}
+
+/* ===== โหลดประวัติ (รองรับ 1/3/7 วัน) ===== */
+async function loadMinutesHours(hours=24){
+  const r = await fetch(`/api/minutes?hours=${hours}`, {cache:'no-store'});
   const j = await r.json();
   if(!j.ok){ console.error(j); return; }
   let rows = j.rows || [];
-  if(rows.length===0 && hours<24) return loadMinutesHours(hours<4?4:24);
 
-  const labels  = rows.map(r => new Date(r.t_ms));
-  const vTemp    = rows.map(r => Number(r.temp));
-  const vCurrent = rows.map(r => Number(r.current));
-  const vLevel   = rows.map(r => Number(r.level));
-  const vCycles  = rows.map(r => Number(r.cycles));
+  // ถ้าไม่มีข้อมูล ลองขยายช่วงอัตโนมัติ
+  if(rows.length === 0){
+    if(hours < 72)  return loadMinutesHours(72);
+    if(hours < 168) return loadMinutesHours(168);
+  }
 
-  charts.temp.data.labels    = labels; charts.temp.data.datasets[0].data    = vTemp;
-  charts.current.data.labels = labels; charts.current.data.datasets[0].data = vCurrent;
-  charts.level.data.labels   = labels; charts.level.data.datasets[0].data   = vLevel;
-  charts.cycles.data.labels  = labels; charts.cycles.data.datasets[0].data  = vCycles;
+  // ปรับแกนเวลา
+  const tUnit = chooseTimeUnit(hours);
+  charts.temp.options.scales.x.time.unit    = tUnit;
+  charts.current.options.scales.x.time.unit = tUnit;
+  charts.level.options.scales.x.time.unit   = tUnit;
+  charts.cycles.options.scales.x.time.unit  = tUnit;
 
-  const samples = hours===1?300: hours===4?400:600;
-  charts.temp.options.plugins.decimation.samples    = samples;
-  charts.current.options.plugins.decimation.samples = samples;
-  charts.level.options.plugins.decimation.samples   = samples;
-  charts.cycles.options.plugins.decimation.samples  = samples;
+  // สร้าง series แบบ {x,y} พร้อมจุด null
+  const sTemp    = buildSeries(rows, 'temp',    hours);
+  const sCurrent = buildSeries(rows, 'current', hours);
+  const sLevel   = buildSeries(rows, 'level',   hours);
+  const sCycles  = buildSeries(rows, 'cycles',  hours);
 
-  Object.assign(charts.temp.options.scales.y,    niceRange(vTemp));
-  Object.assign(charts.current.options.scales.y, niceRange(vCurrent));
-  Object.assign(charts.level.options.scales.y,   niceRange(vLevel));
-  Object.assign(charts.cycles.options.scales.y,  niceRange(vCycles));
+  const connectShort = hours <= 24; // ช่วงสั้นเชื่อมได้, ช่วงยาวไม่เชื่อม
+  charts.temp.data.datasets[0].spanGaps    = connectShort;
+  charts.current.data.datasets[0].spanGaps = connectShort;
+  charts.level.data.datasets[0].spanGaps   = connectShort;
+  charts.cycles.data.datasets[0].spanGaps  = false; // cycles ไม่เชื่อม
+
+  charts.temp.data.datasets[0].data    = sTemp;
+  charts.current.data.datasets[0].data = sCurrent;
+  charts.level.data.datasets[0].data   = sLevel;
+  charts.cycles.data.datasets[0].data  = sCycles;
+
+  // decimation: เปิดเฉพาะเมื่อข้อมูลเยอะ
+  const samples = chooseSamples(hours);
+  const count = rows.length;
+  const enableDecim = count > samples * 1.2;
+  for (const c of [charts.temp, charts.current, charts.level, charts.cycles]) {
+    c.options.plugins.decimation.enabled = enableDecim;
+    c.options.plugins.decimation.samples = samples;
+  }
+
+  // ปรับ y-range ตามค่าจริง
+  Object.assign(charts.temp.options.scales.y,    niceRangeFromSeries(sTemp));
+  Object.assign(charts.current.options.scales.y, niceRangeFromSeries(sCurrent));
+  Object.assign(charts.level.options.scales.y,   niceRangeFromSeries(sLevel));
+  Object.assign(charts.cycles.options.scales.y,  niceRangeFromSeries(sCycles));
 
   charts.temp.update(); charts.current.update(); charts.level.update(); charts.cycles.update();
   document.querySelector('#rec-count').textContent = String(rows.length);
@@ -335,13 +388,14 @@ document.querySelectorAll('.btn.range').forEach(b=>{
   b.addEventListener('click', ()=>{
     document.querySelectorAll('.btn.range').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
-    loadMinutesHours(parseInt(b.dataset.hours||'1',10));
+    const h = parseInt(b.dataset.hours||'24',10);
+    loadMinutesHours(h);
   });
 });
 document.querySelector('#btn-refresh').addEventListener('click', ()=>{
   refreshKPI();
   const act=document.querySelector('.btn.range.active');
-  loadMinutesHours(parseInt(act?.dataset.hours||'1',10));
+  loadMinutesHours(parseInt(act?.dataset.hours||'24',10));
 });
 document.querySelector('#btn-auto').addEventListener('click', ()=>{
   autoOn=!autoOn;
@@ -361,7 +415,7 @@ const $count = document.getElementById('alerts-count');
 const $panel = document.getElementById('alerts-panel');
 if($mute) $mute.checked = ALERTS_MUTE;
 
-/* Blink title when new alert */
+/* Blink title */
 let BLINK_INT=0, ORIG_TITLE=document.title;
 function blinkStart(){ if(BLINK_INT) return; let on=false; BLINK_INT=setInterval(()=>{ document.title = on?'⚠ ALERT!':ORIG_TITLE; on=!on; }, 700); }
 function blinkStop(){ if(BLINK_INT){ clearInterval(BLINK_INT); BLINK_INT=0; document.title=ORIG_TITLE; } }
@@ -470,14 +524,12 @@ async function fetchAlerts(){
     if(newest > ALERTS_LAST_TS){
       ALERTS_LAST_TS = newest;
       localStorage.setItem('alerts.lastTs', String(ALERTS_LAST_TS));
-      /* เปลี่ยนเป็นเสียงยาว ~10s */
-      startAlarm(10000);
+      startAlarm(10000); // ดัง ~10 วินาที
       blinkStart();
       if($panel){ $panel.classList.add('alert-flash'); setTimeout(()=>$panel.classList.remove('alert-flash'), 1800); }
     }
     if(openCount===0) { blinkStop(); stopAlarm(); }
 
-    // footer badge
     const ds = document.getElementById('dev-status');
     if(ds){
       if(openCount>0){ ds.textContent=`ALERT ×${openCount}`; ds.classList.remove('ok'); ds.style.color='#b91c1c'; }
@@ -498,11 +550,10 @@ if($mute){
 /* ===== Kickoff ===== */
 (async()=>{
   await refreshKPI();
-  await loadMinutesHours(24);
+  await loadMinutesHours(24); // เริ่มที่ 1 วัน
   setupAuto();
-
   await fetchAlerts();
-  setInterval(fetchAlerts, 10000); // every 10s
+  setInterval(fetchAlerts, 10000);
 })();
 </script>
 </body>
