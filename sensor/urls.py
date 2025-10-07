@@ -25,4 +25,7 @@ urlpatterns = [
     # --- Mobile helpers ---
     path("api/expo-token", expo_token_api, name="expo_token"),
     path("api/status/summary", views.status_summary, name="status_summary"),
+
+    # ✅ เพิ่มเส้นทางลงทะเบียน push token สำหรับ Expo app
+    path("api/push/register", views.push_register, name="push_register"),
 ]
