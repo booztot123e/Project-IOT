@@ -52,4 +52,5 @@ Cloud & Notification	Firebase Realtime, Firebase Cloud Messaging (FCM)
 ส่งออกข้อมูลรายวันเป็นไฟล์ CSV สำหรับงานวิเคราะห์ (OEE / Maintenance Report)
 
 # ตัวอย่างผลลัพธ์ (Demo / Example)
+<img width="1218" height="873" alt="Screenshot 2025-10-10 060206" src="https://github.com/user-attachments/assets/47cee201-754b-4c6a-98ef-97f2625de168" />
 
