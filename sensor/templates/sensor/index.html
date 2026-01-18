@@ -8,11 +8,13 @@
   <!-- Chart.js + time adapter -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <style>
     :root{
       --bg:#f6f7f8; --card:#ffffff; --muted:#6b7280; --line:#e5e7eb; --ink:#111827;
-      --temp:#f97316; --amps:#0ea5e9; --cycles:#8b5cf6; --level:#22c55e;
+      --temp:#f97316; --cycles:#8b5cf6; --level:#22c55e;
       --tick:#94a3b8; --grid:#eef2ff;
     }
     *{box-sizing:border-box}
@@ -20,7 +22,6 @@
     body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
     .wrap{max-width:1280px;margin:18px auto;padding:0 16px}
 
-    /* Topbar */
     .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     h1{margin:0 8px 0 0;font-size:22px;letter-spacing:.2px}
     .sub{font-size:12px;color:var(--muted)}
@@ -29,9 +30,8 @@
     .btn.active{background:#111;color:#fff;border-color:#111}
     .badge{padding:2px 8px;border-radius:999px;font-size:11px;background:#eef2ff;color:#4338ca}
 
-    /* Cards */
     .grid{display:grid;gap:12px}
-    .cards{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:12px}
+    .cards{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px}
     @media(max-width:1024px){.cards{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:640px){.cards{grid-template-columns:1fr}}
     .card{background:var(--card);border-radius:14px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:14px}
@@ -40,18 +40,15 @@
     .k-sub{font-size:11px;color:var(--muted);margin-top:4px}
     .chip{font-size:11px;padding:2px 8px;border-radius:999px;background:#e5f6ed;color:#16a34a;font-weight:700}
 
-    /* Panels */
     .panel{background:var(--card);border-radius:14px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:12px}
     .two{grid-template-columns:1fr 1fr}
     .panel h3{margin:0 0 6px 2px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
     .chart-wrap{height:230px}
     canvas{width:100%;height:100%;background:#fff;border-radius:10px}
 
-    /* Footer */
     .footer{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px;margin-top:10px}
     .ok{color:#16a34a}
 
-    /* Alert flash */
     .alert-flash{ animation:alertFlash 1.8s ease-in-out; }
     @keyframes alertFlash{
       0%,100%{ box-shadow:0 2px 6px rgba(0,0,0,.06); }
@@ -68,27 +65,22 @@
       <div class="badge" id="source-badge">source: —</div>
 
       <div class="right">
-        <!-- ปุ่มช่วงเวลาใหม่ -->
         <button class="btn range active" data-hours="24">1d</button>
         <button class="btn range" data-hours="72">3d</button>
         <button class="btn range" data-hours="168">7d</button>
         <button id="btn-refresh" class="btn" title="Refresh">⟳</button>
         <button id="btn-auto" class="btn" title="Toggle auto refresh">Auto: ON</button>
         <button id="btn-csv" class="btn" title="Download CSV">⬇ CSV</button>
+        <button id="btn-xlsx" class="btn" title="Download Excel">⬇ Excel</button>
       </div>
     </div>
 
-    <!-- KPI cards -->
+    <!-- KPI cards (ไม่มี current) -->
     <div class="grid cards">
       <div class="card">
         <div class="k-label">Temperature</div>
         <div class="k-value"><span id="k-tempc">—</span><span style="font-weight:600">°C</span></div>
         <div class="k-sub"><span id="k-tempf">—</span>°F • <span id="k-temp-badge" class="chip" style="display:none"></span></div>
-      </div>
-      <div class="card">
-        <div class="k-label">Current</div>
-        <div class="k-value"><span id="k-amps">—</span><span style="font-weight:600">A</span></div>
-        <div class="k-sub"><span id="k-amps-status" class="chip" style="display:none"></span></div>
       </div>
       <div class="card">
         <div class="k-label">Cycles</div>
@@ -102,15 +94,11 @@
       </div>
     </div>
 
-    <!-- Charts -->
+    <!-- Charts (ไม่มี current) -->
     <div class="grid two" style="margin-top:12px">
       <div class="panel">
         <h3>🌡️ Temperature Trend</h3>
         <div class="chart-wrap"><canvas id="c-temp"></canvas></div>
-      </div>
-      <div class="panel">
-        <h3>⚡ Current Flow</h3>
-        <div class="chart-wrap"><canvas id="c-current"></canvas></div>
       </div>
       <div class="panel">
         <h3>🔁 Cycle Rate</h3>
@@ -120,25 +108,20 @@
         <h3>📏 Level Monitoring</h3>
         <div class="chart-wrap"><canvas id="c-level"></canvas></div>
       </div>
-    </div>
-
-    <!-- Alerts Panel -->
-    <div id="alerts-panel" class="panel" style="margin-top:12px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <h3 style="margin:0;font-size:14px;color:#6b7280">⚠ Alerts</h3>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280">
-          <input id="alerts-mute" type="checkbox"/> Mute
-        </label>
-        <span id="alerts-count" style="font-size:12px;color:#6b7280">—</span>
+      <div class="panel">
+        <h3>⚠ Alerts</h3>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280">
+            <input id="alerts-mute" type="checkbox"/> Mute
+          </label>
+          <span id="alerts-count" style="font-size:12px;color:#6b7280">—</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <button id="alerts-enable-sound" class="btn" style="padding:4px 8px">🔔 Enable sound</button>
+          <button id="alerts-test-beep" class="btn" style="padding:4px 8px">▶ Test beep</button>
+        </div>
+        <div id="alerts-list" style="margin-top:8px;font-size:13px;color:#374151">Loading…</div>
       </div>
-
-      <!-- Alert controls (Enable/Test sound) -->
-      <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
-        <button id="alerts-enable-sound" class="btn" style="padding:4px 8px">🔔 Enable sound</button>
-        <button id="alerts-test-beep" class="btn" style="padding:4px 8px">▶ Test beep</button>
-      </div>
-
-      <div id="alerts-list" style="margin-top:8px;font-size:13px;color:#374151">Loading…</div>
     </div>
 
     <div class="footer">
@@ -164,7 +147,6 @@ setInterval(nowLbl, 1000); nowLbl();
 const css = getComputedStyle(document.documentElement);
 const PAL = {
   temp:   css.getPropertyValue('--temp').trim()   || '#f97316',
-  amps:   css.getPropertyValue('--amps').trim()   || '#0ea5e9',
   cycles: css.getPropertyValue('--cycles').trim() || '#8b5cf6',
   level:  css.getPropertyValue('--level').trim()  || '#22c55e',
   tick:   css.getPropertyValue('--tick').trim()   || '#94a3b8',
@@ -209,7 +191,7 @@ function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
       },
     }]},
     options:{
-      parsing:false, /* เราจะป้อน {x,y} เอง */
+      parsing:false,
       responsive:true, maintainAspectRatio:false, normalized:true,
       animation:{duration:400, easing:'easeOutQuad'},
       interaction:{mode:'index', intersect:false},
@@ -226,12 +208,11 @@ function makeAreaChart(canvasSel, label, color, {fill=true, stepped=false}={}){
   });
 }
 
-/* ===== build charts ===== */
+/* ===== build charts (ไม่มี current) ===== */
 const charts = {
-  temp:    makeAreaChart('#c-temp',    'Temp (°C)',   PAL.temp),
-  current: makeAreaChart('#c-current', 'Current (A)', PAL.amps),
-  cycles:  makeAreaChart('#c-cycles',  'Cycles',      PAL.cycles, {fill:false, stepped:'middle'}),
-  level:   makeAreaChart('#c-level',   'Level (cm)',  PAL.level),
+  temp:   makeAreaChart('#c-temp',   'Temp (°C)',  PAL.temp),
+  cycles: makeAreaChart('#c-cycles', 'Cycles',     PAL.cycles, {fill:false, stepped:'middle'}),
+  level:  makeAreaChart('#c-level',  'Level (cm)', PAL.level),
 };
 
 /* ===== helpers ===== */
@@ -261,7 +242,7 @@ async function getLatestSmart(){
     if(r.ok){ const j=await r.json(); if(j && j.ok) return {...j, from:'local'}; }
     throw new Error();
   }catch{
-    return { ts_ms:Date.now(), temp:null, current:null, level:null, cycles:null, from:'offline' };
+    return { ts_ms:Date.now(), temp:null, level:null, cycles:null, from:'offline' };
   }
 }
 
@@ -279,14 +260,14 @@ function chooseSamples(hours){
 
 /* ใส่ null คั่นรูโหว่ เพื่อไม่ให้เชื่อมเส้น */
 function buildSeries(rows, key, hours){
-  const gapMs = hours <= 24 ? 15*60*1000 : 60*60*1000; // >15 นาที (1d) / >1ชม. (3–7d) = gap
+  const gapMs = hours <= 24 ? 15*60*1000 : 60*60*1000;
   const out = [];
   let prev = null;
   for(const r of rows){
     const t = Number(r.t_ms);
     const v = r[key] != null ? Number(r[key]) : null;
     if(prev && t - prev > gapMs){
-      out.push({x:new Date(prev + 1), y:null}); // คั่นให้ Chart.js ตัดเส้น
+      out.push({x:new Date(prev + 1), y:null});
     }
     out.push({x:new Date(t), y: Number.isFinite(v) ? v : null});
     prev = t;
@@ -294,72 +275,70 @@ function buildSeries(rows, key, hours){
   return out;
 }
 
-/* ===== โหลดประวัติ (รองรับ 1/3/7 วัน) ===== */
+/* ===== โหลดประวัติ (1/3/7 วัน) ===== */
 async function loadMinutesHours(hours=24){
   const r = await fetch(`/api/minutes?hours=${hours}`, {cache:'no-store'});
   const j = await r.json();
   if(!j.ok){ console.error(j); return; }
   let rows = j.rows || [];
 
-  // ถ้าไม่มีข้อมูล ลองขยายช่วงอัตโนมัติ
   if(rows.length === 0){
     if(hours < 72)  return loadMinutesHours(72);
     if(hours < 168) return loadMinutesHours(168);
   }
 
-  // ปรับแกนเวลา
   const tUnit = chooseTimeUnit(hours);
-  charts.temp.options.scales.x.time.unit    = tUnit;
-  charts.current.options.scales.x.time.unit = tUnit;
-  charts.level.options.scales.x.time.unit   = tUnit;
-  charts.cycles.options.scales.x.time.unit  = tUnit;
+  charts.temp.options.scales.x.time.unit   = tUnit;
+  charts.level.options.scales.x.time.unit  = tUnit;
+  charts.cycles.options.scales.x.time.unit = tUnit;
 
-  // สร้าง series แบบ {x,y} พร้อมจุด null
-  const sTemp    = buildSeries(rows, 'temp',    hours);
-  const sCurrent = buildSeries(rows, 'current', hours);
-  const sLevel   = buildSeries(rows, 'level',   hours);
-  const sCycles  = buildSeries(rows, 'cycles',  hours);
+  const sTemp   = buildSeries(rows, 'temp',   hours);
+  const sLevel  = buildSeries(rows, 'level',  hours);
+  const sCycles = buildSeries(rows, 'cycles', hours);
 
-  const connectShort = hours <= 24; // ช่วงสั้นเชื่อมได้, ช่วงยาวไม่เชื่อม
-  charts.temp.data.datasets[0].spanGaps    = connectShort;
-  charts.current.data.datasets[0].spanGaps = connectShort;
-  charts.level.data.datasets[0].spanGaps   = connectShort;
-  charts.cycles.data.datasets[0].spanGaps  = false; // cycles ไม่เชื่อม
+  const connectShort = hours <= 24;
+  charts.temp.data.datasets[0].spanGaps  = connectShort;
+  charts.level.data.datasets[0].spanGaps = connectShort;
+  charts.cycles.data.datasets[0].spanGaps = false;
 
-  charts.temp.data.datasets[0].data    = sTemp;
-  charts.current.data.datasets[0].data = sCurrent;
-  charts.level.data.datasets[0].data   = sLevel;
-  charts.cycles.data.datasets[0].data  = sCycles;
+  charts.temp.data.datasets[0].data   = sTemp;
+  charts.level.data.datasets[0].data  = sLevel;
+  charts.cycles.data.datasets[0].data = sCycles;
 
-  // decimation: เปิดเฉพาะเมื่อข้อมูลเยอะ
   const samples = chooseSamples(hours);
   const count = rows.length;
   const enableDecim = count > samples * 1.2;
-  for (const c of [charts.temp, charts.current, charts.level, charts.cycles]) {
+  for (const c of [charts.temp, charts.level, charts.cycles]) {
     c.options.plugins.decimation.enabled = enableDecim;
     c.options.plugins.decimation.samples = samples;
   }
 
-  // ปรับ y-range ตามค่าจริง
-  Object.assign(charts.temp.options.scales.y,    niceRangeFromSeries(sTemp));
-  Object.assign(charts.current.options.scales.y, niceRangeFromSeries(sCurrent));
-  Object.assign(charts.level.options.scales.y,   niceRangeFromSeries(sLevel));
-  Object.assign(charts.cycles.options.scales.y,  niceRangeFromSeries(sCycles));
+  Object.assign(charts.temp.options.scales.y,   niceRangeFromSeries(sTemp));
+  Object.assign(charts.level.options.scales.y,  niceRangeFromSeries(sLevel));
+  Object.assign(charts.cycles.options.scales.y, niceRangeFromSeries(sCycles));
 
-  charts.temp.update(); charts.current.update(); charts.level.update(); charts.cycles.update();
+  charts.temp.update(); charts.level.update(); charts.cycles.update();
   document.querySelector('#rec-count').textContent = String(rows.length);
   window.__lastRows = rows;
 }
 
-/* ===== KPI (top cards) ===== */
+/* ===== KPI ===== */
 let autoOn=true, tKpi=0;
 async function refreshKPI(){
   try{
     const d = await getLatestSmart();
     setNum("#k-tempc",  Number(d.temp),   2);
-    setNum("#k-amps",   Number(d.current),2);
+    // tempF
+    const tf = (d.temp!=null && !Number.isNaN(Number(d.temp))) ? (Number(d.temp)*9/5+32) : null;
+    setNum("#k-tempf", tf, 2);
+
     setNum("#k-cycles", Number(d.cycles), 0);
     setNum("#k-level",  Number(d.level),  2);
+
+    // level percent ถ้ามึงส่งมาในอนาคตค่อยใส่ (ตอนนี้โชว์ — ไปก่อน)
+    const pctEl = document.querySelector('#k-level-pct');
+    if(pctEl) pctEl.textContent = '—';
+
     setBadge(d.from);
     const ts = d.ts_ms ? new Date(d.ts_ms) : null;
     document.querySelector('#last-upd').textContent = ts ? ts.toLocaleString() : '—';
@@ -367,20 +346,36 @@ async function refreshKPI(){
 }
 function setupAuto(){ clearInterval(tKpi); if(autoOn) tKpi=setInterval(refreshKPI, REFRESH_MS); }
 
-/* ===== CSV ===== */
+/* ===== CSV / Excel (ไม่มี current) ===== */
 function downloadCSV(){
   const rows = window.__lastRows || [];
-  const head = ['timestamp','temp_c','current_a','cycles','level_cm'];
+  const head = ['timestamp','temp_c','cycles','level_cm'];
   const lines = [head.join(',')];
   for(const r of rows){
     const ts = new Date(r.t_ms).toISOString();
-    lines.push([ts, r.temp??'', r.current??'', r.cycles??'', r.level??''].join(','));
+    lines.push([ts, r.temp??'', r.cycles??'', r.level??''].join(','));
   }
   const blob = new Blob([lines.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`minutes_{{ device_id }}.csv`.replace(/\s+/g,'');
   a.click(); URL.revokeObjectURL(a.href);
+}
+function downloadXLSX(){
+  const rows = window.__lastRows || [];
+  const data = [
+    ['timestamp','temp_c','cycles','level_cm'],
+    ...rows.map(r => [
+      new Date(r.t_ms).toISOString(),
+      r.temp ?? '',
+      r.cycles ?? '',
+      r.level ?? '',
+    ])
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb, ws, 'minutes');
+  XLSX.writeFile(wb, `minutes_{{ device_id }}.xlsx`.replace(/\s+/g,''));
 }
 
 /* ===== UI ===== */
@@ -403,6 +398,7 @@ document.querySelector('#btn-auto').addEventListener('click', ()=>{
   setupAuto();
 });
 document.querySelector('#btn-csv').addEventListener('click', downloadCSV);
+document.querySelector('#btn-xlsx').addEventListener('click', downloadXLSX);
 
 /* ===================================================================== */
 /* =======================  Alerts (Mute + Sound)  ===================== */
@@ -415,12 +411,10 @@ const $count = document.getElementById('alerts-count');
 const $panel = document.getElementById('alerts-panel');
 if($mute) $mute.checked = ALERTS_MUTE;
 
-/* Blink title */
 let BLINK_INT=0, ORIG_TITLE=document.title;
 function blinkStart(){ if(BLINK_INT) return; let on=false; BLINK_INT=setInterval(()=>{ document.title = on?'⚠ ALERT!':ORIG_TITLE; on=!on; }, 700); }
 function blinkStop(){ if(BLINK_INT){ clearInterval(BLINK_INT); BLINK_INT=0; document.title=ORIG_TITLE; } }
 
-/* Render list */
 function renderAlertRows(rows){
   if(!rows.length){ $list.textContent='No alerts'; blinkStop(); return; }
   $list.innerHTML = rows.map(x=>{
@@ -441,7 +435,7 @@ function renderAlertRows(rows){
   }).join('');
 }
 
-/* ====== Sound unlock & 10s Alarm (WebAudio, louder) ====== */
+/* ====== Sound unlock & 10s Alarm ====== */
 let AUDIO_CTX = null; let MASTER_GAIN = null;
 let AUDIO_ENABLED = localStorage.getItem('alerts.audioEnabled') === '1';
 const btnEnable = document.getElementById('alerts-enable-sound');
@@ -512,7 +506,7 @@ if (AUDIO_ENABLED && btnEnable) { btnEnable.textContent = '🔔 Sound ON'; btnEn
 /* Poll alerts */
 async function fetchAlerts(){
   try{
-    const r = await fetch('/api/alerts/recent/?limit=20',{cache:'no-store'});
+    const r = await fetch('/api/alerts/recent?limit=20',{cache:'no-store'});
     if(!r.ok) throw new Error(r.status);
     const j = await r.json(); if(!j.ok) throw 0;
     const rows = j.rows || [];
@@ -524,9 +518,9 @@ async function fetchAlerts(){
     if(newest > ALERTS_LAST_TS){
       ALERTS_LAST_TS = newest;
       localStorage.setItem('alerts.lastTs', String(ALERTS_LAST_TS));
-      startAlarm(10000); // ดัง ~10 วินาที
+      startAlarm(10000);
       blinkStart();
-      if($panel){ $panel.classList.add('alert-flash'); setTimeout(()=>$panel.classList.remove('alert-flash'), 1800); }
+      if($panel){ $panel.classList.add('alert-flash'); setTimeout(()=>{$panel.classList.remove('alert-flash')}, 1800); }
     }
     if(openCount===0) { blinkStop(); stopAlarm(); }
 
@@ -537,8 +531,6 @@ async function fetchAlerts(){
     }
   }catch(e){ /* silent */ }
 }
-
-/* events */
 if($mute){
   $mute.addEventListener('change', ()=>{
     ALERTS_MUTE = $mute.checked;
@@ -550,7 +542,7 @@ if($mute){
 /* ===== Kickoff ===== */
 (async()=>{
   await refreshKPI();
-  await loadMinutesHours(24); // เริ่มที่ 1 วัน
+  await loadMinutesHours(24);
   setupAuto();
   await fetchAlerts();
   setInterval(fetchAlerts, 10000);

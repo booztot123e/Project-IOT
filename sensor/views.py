@@ -125,7 +125,7 @@ def temp_api(request: HttpRequest):
 @never_cache
 @require_GET
 def latest_api(request: HttpRequest):
-    """ล่าสุดทุก metric สำหรับหน้า Dashboard"""
+    """ล่าสุดทุก metric สำหรับหน้า Dashboard (Firestore) — schema ใหม่: ไม่มี current"""
     try:
         fs = get_fs()
         if fs is None:
@@ -149,7 +149,7 @@ def latest_api(request: HttpRequest):
                     ret["temp_f"] = None
                 return ret
 
-            # current / level / cycles
+            # level / cycles
             ret = {
                 "value": d.get("value", d.get("value_avg")),
                 "unit": d.get("unit"),
@@ -159,7 +159,8 @@ def latest_api(request: HttpRequest):
                 ret["percent"] = d.get("percent")
             return ret
 
-        for metric in ("temp", "current", "level", "cycles"):
+        # ✅ schema ใหม่: ไม่มี current
+        for metric in ("temp", "level", "cycles"):
             try:
                 q = (
                     fs.collection("devices").document(DEVICE_ID)
@@ -189,14 +190,33 @@ def latest_api(request: HttpRequest):
 
 
 # ---- Local SQLite latest for dashboard ----
-
+@require_GET
 def latest_local(request):
-    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
-    cur.execute("SELECT ts_ms,temp,current,level,cycles FROM readings ORDER BY ts_ms DESC LIMIT 1")
-    row = cur.fetchone(); conn.close()
-    if not row: return JsonResponse({"ok": False, "reason": "no_data"}, status=404)
-    ts_ms, t, a, lvl, cyc = row
-    return JsonResponse({"ok": True, "source":"local","ts_ms": ts_ms, "temp": t, "current": a, "level": lvl, "cycles": cyc})
+    """ใช้กับหน้าเว็บที่ยิง /api/latest — schema ใหม่: ไม่มี current"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT ts_ms, temp, level, cycles
+        FROM readings
+        ORDER BY ts_ms DESC
+        LIMIT 1
+    """)
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return JsonResponse({"ok": False, "reason": "no_data"}, status=404)
+
+    ts_ms, t, lvl, cyc = row
+    return JsonResponse({
+        "ok": True,
+        "source": "local",
+        "ts_ms": ts_ms,
+        "temp": t,
+        "level": lvl,
+        "cycles": cyc
+    })
+
 
 @require_GET
 def minutes_api(request):
@@ -207,31 +227,49 @@ def minutes_api(request):
     DEVICE_ID = os.getenv("DEVICE_ID", "pi5-001")
 
     try:
-        hours = max(1, min(int(request.GET.get("hours", "1")), 48))
+        hours = max(1, min(int(request.GET.get("hours", "24")), 168))
+    except Exception:
+        hours = 24
+
+    try:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_id = since.strftime("%Y%m%d%H%M")  # YYYYMMDDHHmm (UTC)
 
-        from google.cloud import firestore
-        db = firestore.Client()
-        coll = db.collection("devices").document(DEVICE_ID).collection("minutes")
+        fs = get_fs()
+        if fs is None:
+            return JsonResponse({"ok": False, "reason": "firestore_not_ready"}, status=500)
 
-        # ✅ ใช้ DocumentReference กับ "__name__"
-        start_ref = coll.document(start_id)
-        q = coll.where("__name__", ">=", start_ref).order_by("__name__")
+        coll = fs.collection("devices").document(DEVICE_ID).collection("minutes")
 
+        # --- ดึงแบบเรียง ASC แล้ว "filter ด้วย id" ฝั่ง python ชัวร์สุด ---
+        # จำกัดจำนวน doc กันหนักเครื่อง (สูงสุด 7 วัน = 10080 นาที)
+        max_docs = min(hours * 60 + 30, 11000)
+
+        q = coll.order_by("__name__", direction=_ORDER_ASC).limit(max_docs)
         docs = list(q.stream())
 
         rows = []
         for d in docs:
+            if d.id < start_id:
+                continue  # ✅ filter ชัวร์ ไม่พึ่ง where(__name__)
             x = d.to_dict() or {}
+
+            # id = YYYYMMDDHHmm (UTC)
             ts = datetime.strptime(d.id, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
             t_ms = int(ts.timestamp() * 1000)
+
+            # schema minutes บน Firestore (ที่ uploader จะส่งไป)
+            temp_avg = (x.get("temp") or {}).get("avg")
+            temp_last = (x.get("temp") or {}).get("last")
+            level_avg = (x.get("level") or {}).get("avg")
+            level_last = (x.get("level") or {}).get("last")
+            cycles_last = (x.get("cycles") or {}).get("last")
+
             rows.append({
                 "t_ms":   t_ms,
-                "temp":    (x.get("temp",   {}).get("avg")    or x.get("temp",   {}).get("last")),
-                "current": (x.get("current",{}).get("avg")    or x.get("current",{}).get("last")),
-                "level":   (x.get("level",  {}).get("avg")    or x.get("level",  {}).get("last")),
-                "cycles":  (x.get("cycles", {}).get("last")),
+                "temp":   temp_avg if temp_avg is not None else temp_last,
+                "level":  level_avg if level_avg is not None else level_last,
+                "cycles": cycles_last,
             })
 
         return JsonResponse({"ok": True, "rows": rows})
@@ -243,13 +281,17 @@ def minutes_api(request):
 @never_cache
 @require_GET
 def history_api(request: HttpRequest):
-    """ประวัติสำหรับกราฟ (minutes ถ้ามี, ไม่มีก็ readings)"""
+    """ประวัติสำหรับกราฟ (minutes ถ้ามี, ไม่มีก็ readings) — schema ใหม่: ไม่มี current"""
     try:
         fs = get_fs()
         if fs is None:
             return JsonResponse({"items": [], "count": 0})
 
         metric = (request.GET.get("metric", "temp") or "temp").lower()
+        # ✅ กันคนยิง metric=current แล้วพัง
+        if metric == "current":
+            return JsonResponse({"items": [], "count": 0})
+
         hours  = int(request.GET.get("hours", "4") or "4")
         if hours <= 0:
             hours = 4
@@ -260,8 +302,8 @@ def history_api(request: HttpRequest):
         # ---------- minutes (schema: ts_minute + nested stats) ----------
         try:
             minutes_ref = fs.collection("devices").document(DEVICE_ID).collection("minutes")
-            # ใช้ ts_minute (ISO string) สำหรับกรอง/เรียงเวลา
             iso_since = since.astimezone(timezone.utc).isoformat()
+
             if FieldFilter:
                 q = (
                     minutes_ref
@@ -274,16 +316,15 @@ def history_api(request: HttpRequest):
                     .where("ts_minute", ">=", iso_since)
                     .order_by("ts_minute", direction=_ORDER_ASC)
                 )
+
             rows = [d.to_dict() for d in q.stream()]
             for r in rows:
                 ts = r.get("ts_minute")
                 if not ts:
                     continue
+
                 if metric == "temp":
                     s = (r.get("temp") or {})
-                    avg, mn, mx = s.get("avg"), s.get("min"), s.get("max")
-                elif metric == "current":
-                    s = (r.get("current") or {})
                     avg, mn, mx = s.get("avg"), s.get("min"), s.get("max")
                 elif metric == "level":
                     s = (r.get("level") or {})
@@ -292,6 +333,7 @@ def history_api(request: HttpRequest):
                     s = (r.get("cycles") or {})
                     val = s.get("sum")
                     avg = val; mn = val; mx = val
+
                 if avg is not None:
                     items.append({"timestamp": ts, "min": mn, "avg": avg, "max": mx, "value": avg})
         except Exception:
@@ -305,6 +347,7 @@ def history_api(request: HttpRequest):
                       .collection("series").document(metric)
                       .collection("readings")
                 )
+
                 if FieldFilter:
                     q = (
                         series_ref
@@ -334,7 +377,6 @@ def history_api(request: HttpRequest):
             except Exception:
                 pass
 
-        
         return JsonResponse({"items": items, "count": len(items)})
     except Exception as e:
         return JsonResponse({"items": [], "count": 0, "error": str(e)}, status=500)
@@ -352,8 +394,10 @@ def expo_token_api(request: HttpRequest):
         TOKENS_JSON.parent.mkdir(parents=True, exist_ok=True)
         arr = []
         if TOKENS_JSON.exists():
-            try: arr = json.loads(TOKENS_JSON.read_text())
-            except: arr = []
+            try:
+                arr = json.loads(TOKENS_JSON.read_text())
+            except:
+                arr = []
         if token not in arr:
             arr.append(token)
             TOKENS_JSON.write_text(json.dumps(arr, ensure_ascii=False, indent=2))
@@ -428,7 +472,6 @@ def alerts_latest(request: HttpRequest):
         rows = []
         for d in docs:
             obj = d.to_dict() or {}
-            # แปลง timestamp ให้เป็น ISO ถ้ามี
             if "ts_ms" in obj and isinstance(obj["ts_ms"], (int, float)):
                 obj["ts_iso"] = datetime.fromtimestamp(obj["ts_ms"]/1000.0, tz=timezone.utc).isoformat()
             rows.append(obj)
@@ -437,9 +480,10 @@ def alerts_latest(request: HttpRequest):
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
+
 def status_summary(request):
     """
-    สรุปค่าปัจจุบันของทุก sensor (temp/current/level/cycles)
+    สรุปค่าปัจจุบันของทุก sensor (temp/level/cycles) — schema ใหม่: ไม่มี current
     ใช้โดยแอปมือถือ
     """
     try:
@@ -449,11 +493,9 @@ def status_summary(request):
 
         device_id = os.getenv("DEVICE_ID", "pi5-001")
 
-        # โครงสร้างหลักเก็บไว้ที่ document ของ device
         doc = fs.collection("devices").document(device_id).get()
         data = doc.to_dict() or {}
 
-        # เผื่อโปรเจกต์เก็บค่า recent ไว้ที่ series/latest
         if not data.get("latest"):
             try:
                 latest = (
@@ -467,6 +509,7 @@ def status_summary(request):
         return JsonResponse({"ok": True, "data": data})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
 
 @csrf_exempt
 def push_register(request):
@@ -482,8 +525,10 @@ def push_register(request):
     data = {"tokens": []}
     if os.path.exists(path):
         with open(path, "r") as f:
-            try: data = json.load(f)
-            except: data = {"tokens": []}
+            try:
+                data = json.load(f)
+            except:
+                data = {"tokens": []}
     if token not in data["tokens"]:
         data["tokens"].append(token)
     with open(path, "w") as f:

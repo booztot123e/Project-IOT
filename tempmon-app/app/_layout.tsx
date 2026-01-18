@@ -1,12 +1,11 @@
-import { Stack } from 'expo-router';
-import * as React from 'react';
+// app/_layout.tsx
+import { Stack } from "expo-router";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 export default function RootLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      {/* โฟลเดอร์ (tabs) จะถูกเรนเดอร์ใน Stack หลัก */}
-      <Stack.Screen name="(tabs)" />
-      {/* ถ้ามี modal แยก ก็เพิ่ม <Stack.Screen name="modal" options={{ presentation: 'modal' }} /> */}
-    </Stack>
+    <SafeAreaProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </SafeAreaProvider>
   );
 }
