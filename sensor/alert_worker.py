@@ -2,6 +2,33 @@
 import os, json, time, sqlite3, math, urllib.request
 
 # =========================================================
+# ✅ Telegram (telegram_notify.py อยู่ในโฟลเดอร์เดียวกัน)
+# =========================================================
+TELEGRAM_ENABLE = os.getenv("TELEGRAM_ENABLE", "1") == "1"
+
+send_telegram = None
+_import_err = None
+try:
+    from telegram_notify import send_telegram  # อยู่ใน sensor/ เหมือนกัน
+except Exception as e:
+    _import_err = e
+    send_telegram = None
+
+def telegram_send_safe(msg: str):
+    """ส่ง Telegram แบบไม่ทำให้โปรแกรมล่ม + มี debug"""
+    if not TELEGRAM_ENABLE:
+        print("[telegram] disabled (TELEGRAM_ENABLE=0)", flush=True)
+        return
+    if send_telegram is None:
+        print("[telegram] import failed:", _import_err, flush=True)
+        return
+    try:
+        ok = send_telegram(msg)
+        print("[telegram] sent:", ok, flush=True)
+    except Exception as e:
+        print("[telegram] error:", e, flush=True)
+
+# =========================================================
 # GPIO (LED + Passive Buzzer KY-006)
 # =========================================================
 GPIO_ENABLE = os.getenv("GPIO_ENABLE", "1") == "1"
@@ -59,10 +86,7 @@ def _tone(freq_hz: int, sec: float, duty: float = 0.5):
         time.sleep(off_t)
 
 def _alarm_nice():
-    """
-    Alarm ชัด ๆ แบบเครื่องจักร
-    โทนคู่ 900Hz + 1200Hz (sweet spot ของ KY-006)
-    """
+    """Alarm ชัด ๆ แบบเครื่องจักร (โทนคู่ 900Hz + 1200Hz)"""
     for _ in range(2):
         _tone(900, 0.20)
         time.sleep(0.06)
@@ -77,11 +101,10 @@ TOKENS_PATH = os.getenv("PUSH_TOKENS", "/var/lib/tempmon/push_tokens.json")
 DEVICE_ID = os.getenv("DEVICE_ID", "pi5-001")
 
 # =========================================================
-# Alert rules
-# NOTE: ตัด current ออกก่อน เพราะ schema readings ของมึงไม่มี column current แล้ว
+# Alert rules (ปรับตามต้องการ)
 # =========================================================
 RULES = [
-    {"metric": "temp",   "op": ">", "threshold": 40.0, "clear": 38.0, "sev": "high",
+    {"metric": "temp",   "op": ">", "threshold": 37.0, "clear": 34.0, "sev": "high",
      "msg": "Temperature too high"},
     {"metric": "level",  "op": "<", "threshold": 20.0, "clear": 25.0, "sev": "high",
      "msg": "Oil level too low"},
@@ -89,7 +112,7 @@ RULES = [
      "msg": "Cycle rate high"},
 ]
 
-COOLDOWN_SEC = 120
+COOLDOWN_SEC = int(os.getenv("ALERT_COOLDOWN_SEC", "120"))
 
 # =========================================================
 # Helpers
@@ -116,9 +139,7 @@ def ensure_tables(cur):
 
 def get_latest(cur):
     """
-     readings schema ของมึงตอนนี้คือ:
-      ts_ms, temp, level, cycles
-    เลยต้อง SELECT ให้ครบ + map ให้ตรง index
+    readings schema: ts_ms, temp, level, cycles
     """
     row = cur.execute("""
         SELECT ts_ms, temp, level, cycles
@@ -134,7 +155,7 @@ def get_latest(cur):
     return {
         "ts_ms": ts_ms,
         "temp": temp,
-        "current": None,   # ไม่มีใน schema ตอนนี้
+        "current": None,
         "level": level,
         "cycles": cycles
     }
@@ -183,8 +204,8 @@ def expo_push_send(tokens, title, body):
 # =========================================================
 def main():
     _gpio_init()
-
     now_ms = lambda: int(time.time() * 1000)
+
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     ensure_tables(cur)
@@ -200,6 +221,8 @@ def main():
     tokens = push_tokens()
     any_high_active_after = False
 
+    print(f"[worker] device={DEVICE_ID} db={DB_PATH} cooldown={COOLDOWN_SEC}s telegram={TELEGRAM_ENABLE}", flush=True)
+
     for rule in RULES:
         metric = rule["metric"]
         v = latest.get(metric)
@@ -213,44 +236,75 @@ def main():
         active = bool(st[0]) if st else False
         last_sent_ms = st[1] if st else 0
 
+        print(f"[check] {metric} v={v} op={rule['op']} th={rule['threshold']} active={active} last_sent_ms={last_sent_ms}", flush=True)
+
+        # =========================
+        # ALERT OPEN
+        # =========================
         if is_alert:
             if not active:
+                # บันทึก event open
                 cur.execute("""INSERT INTO alert_events
                     (ts_ms, metric, value, threshold, severity, state, message, device_id)
                     VALUES (?,?,?,?,?,?,?,?)""",
                     (latest["ts_ms"], metric, v, rule["threshold"],
-                     rule["sev"], "open", f'{rule["msg"]}: {v:.2f}', DEVICE_ID))
+                     rule["sev"], "open", f'{rule["msg"]}: {float(v):.2f}', DEVICE_ID))
 
+                # set state active=1 (คง last_sent_ms เดิมไว้)
                 cur.execute("""INSERT INTO alert_state(metric,active,last_sent_ms)
                                VALUES(?,?,?)
                                ON CONFLICT(metric) DO UPDATE SET active=excluded.active,
                                                                last_sent_ms=alert_state.last_sent_ms""",
                             (metric, 1, last_sent_ms))
 
+                # ✅ ส่ง Telegram แค่ครั้งเดียวตอน OPEN
+                telegram_send_safe(
+                    f"🚨 ALERT OPEN: {DEVICE_ID}\n"
+                    f"{rule['msg']}\n"
+                    f"{metric}: {float(v):.2f} ({rule['op']}{rule['threshold']})"
+                )
+
+                # Expo push (ถ้ามี token)
+                expo_push_send(
+                    tokens,
+                    f'{DEVICE_ID} • {rule["msg"]}',
+                    f'{metric}: {float(v):.2f} ({rule["op"]}{rule["threshold"]})'
+                )
+
+                # อัปเดต last_sent_ms (ไว้กันอนาคต/รายงาน)
+                cur.execute(
+                    "UPDATE alert_state SET last_sent_ms=? WHERE metric=?",
+                    (now_ms(), metric)
+                )
+
+                # local alarm
                 if rule["sev"] == LOCAL_ALARM_SEV:
                     _led_on()
                     _alarm_nice()
 
-                if now_ms() - last_sent_ms >= COOLDOWN_SEC * 1000:
-                    expo_push_send(
-                        tokens,
-                        f'{DEVICE_ID} • {rule["msg"]}',
-                        f'{metric}: {v:.2f} ({rule["op"]}{rule["threshold"]})'
-                    )
-                    cur.execute(
-                        "UPDATE alert_state SET last_sent_ms=? WHERE metric=?",
-                        (now_ms(), metric)
-                    )
+        # =========================
+        # ALERT CLEARED
+        # =========================
         else:
             if active and v is not None:
                 clear_hit = op_eval("<", v, rule["clear"]) if rule["op"] == ">" else op_eval(">", v, rule["clear"])
                 if clear_hit:
+                    # บันทึก event cleared
                     cur.execute("""INSERT INTO alert_events
                         (ts_ms, metric, value, threshold, severity, state, message, device_id)
                         VALUES (?,?,?,?,?,?,?,?)""",
                         (latest["ts_ms"], metric, v, rule["clear"],
                          rule["sev"], "cleared",
-                         f'{rule["msg"]} resolved: {v:.2f}', DEVICE_ID))
+                         f'{rule["msg"]} resolved: {float(v):.2f}', DEVICE_ID))
+
+                    # ✅ ส่ง Telegram แค่ครั้งเดียวตอน CLEARED
+                    telegram_send_safe(
+                        f"✅ CLEARED: {DEVICE_ID}\n"
+                        f"{rule['msg']} resolved\n"
+                        f"{metric}: {float(v):.2f} (clear={rule['clear']})"
+                    )
+
+                    # set inactive
                     cur.execute("UPDATE alert_state SET active=0 WHERE metric=?", (metric,))
 
         if rule["sev"] == "high" and is_alert:
